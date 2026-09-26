@@ -17,6 +17,7 @@ service vendor.imsdcmd /vendor/bin/imsdcmd
     group vendor_imsdcm
     capabilities
     disabled
+    restart_period 1
 
 # Start after persistent properties are loaded (before the first unlock on
 # FBE), so a set kill switch is seen before the DCM service is ever published.

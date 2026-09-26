@@ -17,6 +17,14 @@ rust_library {
     srcs: ["daemon/src/lib.rs"], edition: "2021", vendor: true,
     rustlibs: ["libdiamaneos_ims_dcm", "liblibc"],
 }
+rust_binary {
+    name: "imsdcmd", srcs: ["daemon/src/main.rs"], edition: "2021", vendor: true,
+    rustlibs: ["libbinder_rs", "liblibc", "librustutils",
+        "libdiamaneos_ims_dcm", "libdiamaneos_ims_runtime",
+        "vendor.diamaneos.hardware.imsdcm-V1-rust"],
+    vintf_fragment_modules: ["vendor.diamaneos.hardware.imsdcm.xml"],
+    required: ["imsdcmd.rc"],
+}
 rust_test_host {
     name: "DiamaneOSImsDcmHostTests", srcs: ["dcm/tests/simulation.rs"], edition: "2021",
     rustlibs: ["libdiamaneos_ims_dcm"],
