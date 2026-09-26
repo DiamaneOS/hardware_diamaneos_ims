@@ -12,6 +12,11 @@ rust_library {
     srcs: ["dcm/src/lib.rs"], edition: "2021", vendor: true,
     host_supported: true,
 }
+rust_library {
+    name: "libdiamaneos_ims_runtime", crate_name: "diamaneos_ims_runtime",
+    srcs: ["daemon/src/lib.rs"], edition: "2021", vendor: true,
+    rustlibs: ["libdiamaneos_ims_dcm", "liblibc"],
+}
 rust_test_host {
     name: "DiamaneOSImsDcmHostTests", srcs: ["dcm/tests/simulation.rs"], edition: "2021",
     rustlibs: ["libdiamaneos_ims_dcm"],
