@@ -1,0 +1,433 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The DiamaneOS Project
+//! Single-owner state machine. Adapters execute effects in order. No I/O or timers.
+use crate::protocol::{self as p, Activation, Family, Frame, Kind, PdnType};
+use std::collections::BTreeMap;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+pub const MAX_SESSIONS: usize = 79;
+const EMERGENCY_RESERVE: usize = 8;
+const MAX_CLIENTS: usize = 4;
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Peer {
+    pub node: u32,
+    pub port: u32,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Key {
+    pub slot: i32,
+    pub kind: PdnType,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Request {
+    pub key: Key,
+    pub serial: i32,
+}
+// No Debug implementation for anything carrying address or protocol data.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Network {
+    pub handle: u64,
+    pub v4: Option<Ipv4Addr>,
+    pub v6: Option<Ipv6Addr>,
+    pub mtu: u32,
+}
+impl Network {
+    pub fn valid(&self) -> bool {
+        self.handle != 0
+            && self.mtu <= 65535
+            && self.v4.is_none_or(|a| {
+                !(a.is_unspecified()
+                    || a.is_loopback()
+                    || a.is_multicast()
+                    || a.is_link_local()
+                    || a.is_broadcast())
+            })
+            && self.v6.is_none_or(|a| {
+                !(a.is_unspecified()
+                    || a.is_loopback()
+                    || a.is_multicast()
+                    || a.is_unicast_link_local())
+            })
+    }
+    fn address(&self, f: Family) -> Option<IpAddr> {
+        match f {
+            Family::V4 => self.v4.map(IpAddr::V4),
+            Family::V6 => self.v6.map(IpAddr::V6),
+        }
+    }
+}
+pub enum Effect {
+    Send(Peer, Vec<u8>),
+    BringUp(Request),
+    Release(Request),
+    ReadTime {
+        peer: Peer,
+        txn: u16,
+        pdp: u8,
+        sequence: u32,
+    },
+}
+struct Session {
+    peer: Peer,
+    id: u8,
+    activation: Activation,
+    address: Option<IpAddr>,
+}
+struct Group {
+    request: Request,
+    network: Option<Network>,
+}
+/// Device configuration fixes the modem node and number of slots; no first-packet trust.
+pub struct Engine {
+    modem_node: u32,
+    slots: u32,
+    emergency_enabled: bool,
+    broker: bool,
+    serial: i32,
+    sessions: Vec<Session>,
+    groups: BTreeMap<Key, Group>,
+    indications: BTreeMap<Peer, u16>,
+}
+impl Engine {
+    pub fn new(modem_node: u32, slots: u32) -> Result<Self, &'static str> {
+        if modem_node == u32::MAX || !(1..=3).contains(&slots) {
+            return Err("invalid device configuration");
+        }
+        Ok(Self {
+            modem_node,
+            slots,
+            emergency_enabled: true,
+            broker: false,
+            serial: 0,
+            sessions: vec![],
+            groups: BTreeMap::new(),
+            indications: BTreeMap::new(),
+        })
+    }
+    pub fn session_count(&self) -> usize {
+        self.sessions.len()
+    }
+    fn next_serial(&mut self) -> Option<i32> {
+        self.serial = self.serial.checked_add(1)?;
+        Some(self.serial)
+    }
+    fn sequence(&mut self, peer: Peer) -> u16 {
+        let s = self.indications.entry(peer).or_insert(0);
+        *s = s.wrapping_add(1);
+        if *s == 0 {
+            *s = 1;
+        }
+        *s
+    }
+    fn group_key(a: &Activation) -> Key {
+        Key {
+            slot: a.slot,
+            kind: a.pdn_type,
+        }
+    }
+    pub fn broker_connected(&mut self) -> Vec<Effect> {
+        // Replacement is a new epoch: old reports cannot revive a released request.
+        self.broker = true;
+        let keys: Vec<_> = self.groups.keys().copied().collect();
+        let mut out = vec![];
+        for key in keys {
+            if let Some(serial) = self.next_serial() {
+                let g = self.groups.get_mut(&key).unwrap();
+                g.request.serial = serial;
+                g.network = None;
+                out.push(Effect::BringUp(g.request));
+            }
+        }
+        for s in &mut self.sessions {
+            s.address = None;
+        }
+        out
+    }
+    pub fn broker_lost(&mut self) -> Vec<Effect> {
+        self.broker = false;
+        let peers: Vec<_> = self.indications.keys().copied().collect();
+        let mut out = vec![];
+        for peer in peers {
+            out.extend(self.fail_matching(|s| s.peer == peer));
+        }
+        out
+    }
+    pub fn set_emergency_enabled(&mut self, enabled: bool) -> Vec<Effect> {
+        self.emergency_enabled = enabled;
+        if enabled {
+            vec![]
+        } else {
+            self.fail_matching(|s| s.activation.pdn_type == PdnType::Emergency)
+        }
+    }
+    pub fn peer_gone(&mut self, peer: Peer) -> Vec<Effect> {
+        self.sessions.retain(|s| s.peer != peer);
+        self.indications.remove(&peer);
+        self.release_unused()
+    }
+    pub fn node_gone(&mut self, node: u32) -> Vec<Effect> {
+        self.sessions.retain(|s| s.peer.node != node);
+        self.indications.retain(|p, _| p.node != node);
+        self.release_unused()
+    }
+    pub fn shutdown(&mut self) -> Vec<Effect> {
+        self.sessions.clear();
+        self.indications.clear();
+        self.release_unused()
+    }
+    fn release_unused(&mut self) -> Vec<Effect> {
+        let keys: Vec<_> = self
+            .groups
+            .keys()
+            .filter(|k| {
+                !self
+                    .sessions
+                    .iter()
+                    .any(|s| Self::group_key(&s.activation) == **k)
+            })
+            .copied()
+            .collect();
+        keys.into_iter()
+            .filter_map(|k| self.groups.remove(&k).map(|g| Effect::Release(g.request)))
+            .collect()
+    }
+    fn fail_matching(&mut self, predicate: impl Fn(&Session) -> bool) -> Vec<Effect> {
+        let ids: Vec<_> = self
+            .sessions
+            .iter()
+            .filter(|s| predicate(s))
+            .map(|s| s.id)
+            .collect();
+        let mut out = vec![];
+        for id in ids {
+            let i = self.sessions.iter().position(|s| s.id == id).unwrap();
+            let s = self.sessions.remove(i);
+            let seq = self.sequence(s.peer);
+            out.push(Effect::Send(
+                s.peer,
+                p::indication(seq, s.id, &s.activation, None, false),
+            ));
+        }
+        out.extend(self.release_unused());
+        out
+    }
+    pub fn report(&mut self, request: Request, network: Option<Network>) -> Vec<Effect> {
+        if !self.broker
+            || !self
+                .groups
+                .get(&request.key)
+                .is_some_and(|g| g.request == request)
+        {
+            return vec![];
+        }
+        let Some(network) = network.filter(Network::valid) else {
+            return self.fail_matching(|s| Self::group_key(&s.activation) == request.key);
+        };
+        self.groups.get_mut(&request.key).unwrap().network = Some(network.clone());
+        let mut out = vec![];
+        let ids: Vec<_> = self
+            .sessions
+            .iter()
+            .filter(|s| Self::group_key(&s.activation) == request.key)
+            .map(|s| s.id)
+            .collect();
+        for id in ids {
+            let i = self.sessions.iter().position(|s| s.id == id).unwrap();
+            let s = &self.sessions[i];
+            let address = network.address(s.activation.family);
+            if address.is_some() && address == s.address {
+                continue;
+            }
+            let peer = s.peer;
+            let change = s.address.is_some() && address.is_some();
+            let a = s.activation.clone();
+            let seq = self.sequence(peer);
+            out.push(Effect::Send(
+                peer,
+                p::indication(seq, id, &a, address, change),
+            ));
+            if address.is_some() {
+                self.sessions[i].address = address;
+            } else {
+                self.sessions.remove(i);
+            }
+        }
+        out.extend(self.release_unused());
+        out
+    }
+    /// No reply to non-modem peers, indications, or frames too short to identify.
+    pub fn receive(&mut self, peer: Peer, bytes: &[u8]) -> Vec<Effect> {
+        if peer.node != self.modem_node || peer.port == 0 || peer.port >= 0xffff_fffe {
+            return vec![];
+        }
+        let frame = match Frame::parse(bytes) {
+            Ok(f) => f,
+            Err(_) => {
+                if bytes.len() >= 7 && bytes.len() <= p::MAX_DATAGRAM && bytes[0] == 0 {
+                    return vec![Effect::Send(
+                        peer,
+                        p::response(
+                            u16::from_le_bytes([bytes[1], bytes[2]]),
+                            u16::from_le_bytes([bytes[3], bytes[4]]),
+                            1,
+                            0x3a,
+                        ),
+                    )];
+                }
+                return vec![];
+            }
+        };
+        if frame.kind != Kind::Request {
+            return vec![];
+        }
+        if p::validate_request(&frame).is_err() {
+            return vec![Effect::Send(
+                peer,
+                p::response(frame.txn, frame.id, 1, 0x3a),
+            )];
+        }
+        match frame.id {
+            p::ACTIVATE => self.activate(peer, &frame),
+            p::DEACTIVATE => self.deactivate(peer, &frame),
+            0x22 => vec![], // Observed stock GET_IP_ADDRESS handler sends no reply.
+            // These handlers are enabled only with their validated, bounded fields.
+            0x23 => vec![Effect::Send(peer, p::response(frame.txn, frame.id, 0, 0))],
+            0x33 => {
+                // Width/mandatory validation above; scope destruction to this client.
+                let instance = p::u32_value(frame.required(1).unwrap()).unwrap();
+                self.sessions.retain(|s| {
+                    !(s.peer == peer && s.activation.instance.unwrap_or(0) == instance)
+                });
+                let mut out = vec![Effect::Send(peer, p::response(frame.txn, frame.id, 0, 0))];
+                out.extend(self.release_unused());
+                out
+            }
+            0x32 => vec![Effect::ReadTime {
+                peer,
+                txn: frame.txn,
+                pdp: p::u8_value(frame.required(1).unwrap()).unwrap(),
+                sequence: p::u32_value(frame.required(2).unwrap()).unwrap(),
+            }],
+            0x2e | 0x34 => vec![Effect::Send(peer, p::response(frame.txn, frame.id, 0, 0))],
+            // Undecoded commands never report successful execution.
+            0x25..=0x2a | 0x2c | 0x2d | 0x31 => {
+                vec![Effect::Send(peer, p::response(frame.txn, frame.id, 1, 0))]
+            }
+            _ => vec![Effect::Send(
+                peer,
+                p::response(frame.txn, frame.id, 1, 0x3a),
+            )],
+        }
+    }
+    fn activate(&mut self, peer: Peer, f: &Frame<'_>) -> Vec<Effect> {
+        let a = match Activation::decode(f, self.slots) {
+            Ok(a) => a,
+            Err(e) => {
+                return vec![Effect::Send(
+                    peer,
+                    p::response(f.txn, f.id, 1, if e == p::Error::Value { 0 } else { 0x3a }),
+                )]
+            }
+        };
+        if a.pdn_type == PdnType::Emergency && !self.emergency_enabled {
+            return vec![Effect::Send(peer, p::response(f.txn, f.id, 1, 0))];
+        }
+        if !self.indications.contains_key(&peer) && self.indications.len() >= MAX_CLIENTS {
+            return vec![Effect::Send(peer, p::response(f.txn, f.id, 1, 5))];
+        }
+        if let Some(i) = self
+            .sessions
+            .iter()
+            .position(|s| s.peer == peer && s.activation.same_pdn(&a))
+        {
+            let id = self.sessions[i].id;
+            let address = self.sessions[i].address;
+            self.sessions[i].activation.cookie = a.cookie;
+            let mut out = vec![Effect::Send(peer, p::activation_response(f.txn, id, &a))];
+            if let Some(ip) = address {
+                let seq = self.sequence(peer);
+                out.push(Effect::Send(
+                    peer,
+                    p::indication(seq, id, &a, Some(ip), false),
+                ));
+            }
+            return out;
+        }
+        let normal = self
+            .sessions
+            .iter()
+            .filter(|s| s.activation.pdn_type == PdnType::Ims)
+            .count();
+        if self.sessions.len() >= MAX_SESSIONS
+            || (a.pdn_type == PdnType::Ims && normal >= MAX_SESSIONS - EMERGENCY_RESERVE)
+        {
+            return vec![Effect::Send(peer, p::response(f.txn, f.id, 1, 5))];
+        }
+        let Some(id) = (20..=98).find(|id| !self.sessions.iter().any(|s| s.id == *id)) else {
+            return vec![Effect::Send(peer, p::response(f.txn, f.id, 1, 5))];
+        };
+        let key = Self::group_key(&a);
+        let mut out = vec![Effect::Send(peer, p::activation_response(f.txn, id, &a))];
+        self.indications.entry(peer).or_insert(0);
+        if !self.groups.contains_key(&key) {
+            let Some(serial) = self.next_serial() else {
+                return vec![Effect::Send(peer, p::response(f.txn, f.id, 1, 5))];
+            };
+            let request = Request { key, serial };
+            self.groups.insert(
+                key,
+                Group {
+                    request,
+                    network: None,
+                },
+            );
+            if self.broker {
+                out.push(Effect::BringUp(request));
+            }
+        }
+        self.sessions.push(Session {
+            peer,
+            id,
+            activation: a,
+            address: None,
+        });
+        if let Some(network) = self.groups[&key].network.clone() {
+            out.extend(self.report(self.groups[&key].request, Some(network)));
+        }
+        out
+    }
+    fn deactivate(&mut self, peer: Peer, f: &Frame<'_>) -> Vec<Effect> {
+        let decoded = f
+            .required(1)
+            .and_then(p::u8_value)
+            .and_then(|id| f.optional_u32(0x10).map(|instance| (id, instance)));
+        let (id, instance) = match decoded {
+            Ok(v) => v,
+            Err(_) => return vec![Effect::Send(peer, p::response(f.txn, f.id, 1, 0x3a))],
+        };
+        let found = self.sessions.iter().position(|s| {
+            s.peer == peer
+                && s.id == id
+                && instance.is_none_or(|v| s.activation.instance.unwrap_or(0) == v)
+        });
+        let mut e = p::Encoder::new(Kind::Response, f.txn, f.id);
+        let _ = e.tlv(
+            2,
+            if found.is_some() {
+                &[0, 0, 0, 0]
+            } else {
+                &[1, 0, 0x1c, 0]
+            },
+        );
+        let _ = e.tlv(0x10, &[250]);
+        if let Some(v) = instance {
+            let _ = e.tlv(0x11, &v.to_le_bytes());
+        }
+        let mut out = vec![Effect::Send(peer, e.finish())];
+        if let Some(i) = found {
+            self.sessions.remove(i);
+            out.extend(self.release_unused());
+        }
+        out
+    }
+}
