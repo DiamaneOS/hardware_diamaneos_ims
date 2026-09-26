@@ -1,0 +1,3 @@
+[workspace]
+members = ["dcm"]
+resolver = "2"
