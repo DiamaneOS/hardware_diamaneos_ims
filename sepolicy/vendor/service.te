@@ -4,3 +4,6 @@
 # (add_service in imsdcm.te) and only the broker is granted find;
 # protected_service keeps untrusted apps from ever being granted it.
 type diamaneos_imsdcm_service, hal_service_type, protected_service, service_manager_type;
+
+neverallow { domain -diamaneos_ims_broker_app -diamaneos_imsdcm -servicemanager -su }
+    diamaneos_imsdcm_service:service_manager find;

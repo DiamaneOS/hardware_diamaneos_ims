@@ -8,7 +8,7 @@
 #
 # It gets exactly that: a QRTR socket, its binder service, calls to the
 # broker's callback and reads of its own properties. No network domain, no
-# files, no property writes, no other binder peers, no capabilities.
+# file writes, no property writes, no other binder peers, no capabilities.
 type diamaneos_imsdcm, domain;
 type diamaneos_imsdcm_exec, exec_type, vendor_file_type, file_type;
 init_daemon_domain(diamaneos_imsdcm)
@@ -21,10 +21,16 @@ binder_call(diamaneos_imsdcm, diamaneos_ims_broker_app)
 
 # QRTR, without ioctls: binding an ephemeral port, publishing the service to
 # the kernel name service and exchanging QMI messages are plain socket calls.
-allow diamaneos_imsdcm self:qipcrtr_socket create_socket_perms_no_ioctl;
+allow diamaneos_imsdcm self:qipcrtr_socket { create bind getattr getopt setopt read write };
 
 # Kill switches and the build-time emergency policy (property.te).
 get_prop(diamaneos_imsdcm, diamaneos_imsdcm_prop)
+# Refuse operation when its caller-isolation policy is not enforced.
+allow diamaneos_imsdcm selinuxfs:file r_file_perms;
+
+# Read-only calendar lookup; no clock/timezone setter or location permission.
+get_prop(diamaneos_imsdcm, timezone_prop)
+# Platform domain policy already permits read-only system_zoneinfo_file access.
 
 # Keep it that way.
 neverallow diamaneos_imsdcm self:global_capability_class_set *;
