@@ -34,6 +34,7 @@ java_test_host {
     name: "DiamaneOSImsBrokerHostTests",
     srcs: [
         "src/org/diamaneos/imsbroker/Addresses.java",
+        "src/org/diamaneos/imsbroker/NetworkState.java",
         "tests/src/**/*.java",
     ],
     static_libs: ["junit"],

@@ -28,36 +28,36 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Files and holds the IMS and emergency network requests the IMS DCM daemon
- * asks for, and reports each network's handle, addresses and MTU back to it.
+ * Files and holds the IMS and emergency network requests the IMS DCM daemon asks for, and reports
+ * each network's handle, addresses and MTU back to it.
  *
  * <p>Filing matches stock CneApp (DataCallAgent in its classes.dex):
+ *
  * <ul>
  *   <li>Only IMS or EIMS, on TRANSPORT_CELLULAR, built in the same order as
  *       Tracker.createNetworkRequest (0x00f8e0, 0x00f964). Never MMTEL.
- *   <li>With a slot, the request carries that slot's subscription; without a
- *       slot, it carries none (startDataCall, 0x00fe74).
- *   <li>While the slot has no active subscription, the request waits and is
- *       filed on the next subscription change (startDataCall "pending list",
- *       updateSubInfoReady 0x010188). This applies to emergency requests too.
+ *   <li>With a slot, the request carries that slot's subscription; without a slot, it carries none
+ *       (startDataCall, 0x00fe74).
+ *   <li>While the slot has no active subscription, the request waits and is filed on the next
+ *       subscription change (startDataCall "pending list", updateSubInfoReady 0x010188). This
+ *       applies to emergency requests too.
  *   <li>No timeout of our own: ConnectivityManager.requestNetwork() without one.
- *   <li>The request is held until the daemon releases it; a lost network does
- *       not drop it (Tracker callbacks 0x00f418 to 0x00f5fc, tearDownDataCall
- *       0x0100ac).
+ *   <li>The request is held until the daemon releases it; a lost network does not drop it (Tracker
+ *       callbacks 0x00f418 to 0x00f5fc, tearDownDataCall 0x0100ac).
  * </ul>
  *
- * <p>It never reports a network as up unless ConnectivityManager says it is
- * available now and it has the requested capability on cellular.
+ * <p>It never reports a network as up unless ConnectivityManager says it is available now and it
+ * has the requested capability on cellular.
  *
- * <p>All state lives on one looper thread. Binder calls from the daemon and
- * death notifications are posted to it.
+ * <p>All state lives on one looper thread. Binder calls from the daemon and death notifications are
+ * posted to it.
  */
 final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
     private static final String TAG = "ImsBroker";
 
     /**
-     * The daemon's UID: AID_VENDOR_IMSDCM in vintf/config.fs. Keep the two
-     * equal; a mismatch makes the broker ignore the daemon (and log the UID).
+     * The daemon's UID: AID_VENDOR_IMSDCM in vintf/config.fs. Keep the two equal; a mismatch makes
+     * the broker ignore the daemon (and log the UID).
      */
     private static final int DAEMON_UID = 2990;
 
@@ -78,17 +78,18 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
             };
 
     private IImsDcm mDcm;
+    private long mBinderEpoch;
 
     PdnBroker(Context context, Handler handler) {
         mHandler = handler;
         mConnectivityManager = context.getSystemService(ConnectivityManager.class);
         mSubscriptionManager = context.getSystemService(SubscriptionManager.class);
-        mConnection = new DcmConnection(handler, new BrokerBinder(), this);
+        mConnection = new DcmConnection(handler, () -> new BrokerBinder(++mBinderEpoch), this);
     }
 
     void start() {
-        mSubscriptionManager.addOnSubscriptionsChangedListener(mHandler::post,
-                mSubscriptionsListener);
+        mSubscriptionManager.addOnSubscriptionsChangedListener(
+                mHandler::post, mSubscriptionsListener);
         mConnection.connect();
     }
 
@@ -104,6 +105,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
         // The daemon tells the modem again when it restarts; hold nothing for
         // a daemon that is gone.
         mDcm = null;
+        ++mBinderEpoch;
         for (int i = 0; i < mTrackers.size(); i++) {
             unregister(mTrackers.valueAt(i));
         }
@@ -128,7 +130,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
             // an anomaly). Answer the new serial with the current state.
             tracker.serial = request.serial;
             Log.i(TAG, tracker + ": bring-up for a held request");
-            if (tracker.reported != null) {
+            if (tracker.reported != null && !tracker.isSettling()) {
                 reportUp(tracker, tracker.reported);
             } else if (tracker.lost) {
                 reportDown(tracker);
@@ -156,10 +158,15 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
     }
 
     private static boolean isValid(PdnRequest request) {
-        boolean slotOk = request.slot == PdnRequest.SLOT_UNSPECIFIED
-                || (request.slot >= 0 && request.slot < MAX_SLOTS);
+        if (request == null || request.serial <= 0) return false;
+        boolean slotOk =
+                request.slot == PdnRequest.SLOT_UNSPECIFIED
+                        || (request.slot >= 0 && request.slot < MAX_SLOTS);
         boolean typeOk = request.type == PdnType.IMS || request.type == PdnType.EMERGENCY;
-        return slotOk && typeOk;
+        return slotOk
+                && typeOk
+                && (request.slot != PdnRequest.SLOT_UNSPECIFIED
+                        || request.type == PdnType.EMERGENCY);
     }
 
     /** One key per (slot, type); slot is -1..2 and type 1..2 after isValid(). */
@@ -173,7 +180,16 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
         // fileRequest() may remove a tracker, so iterate over a copy.
         List<PdnTracker> waiting = new ArrayList<>();
         for (int i = 0; i < mTrackers.size(); i++) {
-            if (!mTrackers.valueAt(i).filed) {
+            PdnTracker current = mTrackers.valueAt(i);
+            if (current.filed
+                    && current.slot != PdnRequest.SLOT_UNSPECIFIED
+                    && SubscriptionManager.getSubscriptionId(current.slot) != current.subId) {
+                // Do not move a held IMS request to a different subscription silently.
+                mTrackers.remove(key(current.slot, current.type));
+                unregister(current);
+                reportFailed(current.request(), PdnFailure.UNAVAILABLE);
+                i--;
+            } else if (!current.filed) {
                 waiting.add(mTrackers.valueAt(i));
             }
         }
@@ -183,15 +199,16 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
     }
 
     /**
-     * Files the tracker's request, or leaves it waiting if its slot has no
-     * active subscription. A valid SubscriptionManager.getSubscriptionId(slot)
-     * means an active subscription on that slot, the same test stock makes
-     * with isActiveSubscriptionId(), without needing a phone-state permission.
+     * Files the tracker's request, or leaves it waiting if its slot has no active subscription. A
+     * valid SubscriptionManager.getSubscriptionId(slot) means an active subscription on that slot,
+     * the same test stock makes with isActiveSubscriptionId(), without needing a phone-state
+     * permission.
      */
     private void fileRequest(PdnTracker tracker) {
-        NetworkRequest.Builder builder = new NetworkRequest.Builder()
-                .addCapability(tracker.capability())
-                .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR);
+        NetworkRequest.Builder builder =
+                new NetworkRequest.Builder()
+                        .addCapability(tracker.capability())
+                        .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR);
         if (tracker.slot != PdnRequest.SLOT_UNSPECIFIED) {
             int subId = SubscriptionManager.getSubscriptionId(tracker.slot);
             if (!SubscriptionManager.isUsableSubscriptionId(subId)) {
@@ -199,9 +216,8 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
                 return;
             }
             tracker.subId = subId;
-            builder.setNetworkSpecifier(new TelephonyNetworkSpecifier.Builder()
-                    .setSubscriptionId(subId)
-                    .build());
+            builder.setNetworkSpecifier(
+                    new TelephonyNetworkSpecifier.Builder().setSubscriptionId(subId).build());
         }
         try {
             mConnectivityManager.requestNetwork(builder.build(), tracker, mHandler);
@@ -235,6 +251,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
 
     @Override
     public void onTrackerChanged(PdnTracker tracker) {
+        if (mTrackers.get(key(tracker.slot, tracker.type)) != tracker) return;
         PdnInfo info = tracker.currentInfo();
         if (info == null && tracker.isSettling()) {
             // ConnectivityService moved the request to a new network: decide once
@@ -257,13 +274,21 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
         }
         tracker.reported = info;
         tracker.lost = false;
-        Log.i(TAG, tracker + ": up, v4=" + (info.ipv4Address.length > 0)
-                + " v6=" + (info.ipv6Address.length > 0) + " mtu=" + info.mtu);
+        Log.i(
+                TAG,
+                tracker
+                        + ": up, v4="
+                        + (info.ipv4Address.length > 0)
+                        + " v6="
+                        + (info.ipv6Address.length > 0)
+                        + " mtu="
+                        + info.mtu);
         reportUp(tracker, info);
     }
 
     @Override
     public void onTrackerLost(PdnTracker tracker) {
+        if (mTrackers.get(key(tracker.slot, tracker.type)) != tracker) return;
         Log.i(TAG, tracker + ": lost");
         tracker.reported = null;
         tracker.lost = true;
@@ -272,6 +297,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
 
     @Override
     public void onTrackerUnavailable(PdnTracker tracker) {
+        if (mTrackers.get(key(tracker.slot, tracker.type)) != tracker) return;
         Log.w(TAG, tracker + ": unavailable");
         // ConnectivityService has already removed the request.
         tracker.filed = false;
@@ -314,17 +340,29 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
 
     /** The broker's binder, held only by the daemon. Calls from any other UID are ignored. */
     private final class BrokerBinder extends IPdnBroker.Stub {
+        private final long epoch;
+
+        BrokerBinder(long epoch) {
+            this.epoch = epoch;
+        }
+
         @Override
         public void bringUp(PdnRequest request) {
             if (request != null && isFromDaemon()) {
-                mHandler.post(() -> PdnBroker.this.bringUp(request));
+                mHandler.post(
+                        () -> {
+                            if (epoch == mBinderEpoch) PdnBroker.this.bringUp(request);
+                        });
             }
         }
 
         @Override
         public void release(PdnRequest request) {
             if (request != null && isFromDaemon()) {
-                mHandler.post(() -> PdnBroker.this.release(request));
+                mHandler.post(
+                        () -> {
+                            if (epoch == mBinderEpoch) PdnBroker.this.release(request);
+                        });
             }
         }
 

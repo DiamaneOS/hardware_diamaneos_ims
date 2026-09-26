@@ -22,12 +22,11 @@ import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
 
 /**
- * One network request the broker holds for a (slot, type), and what it knows
- * about the network that satisfies it. Used only on the broker's looper
- * thread; ConnectivityManager delivers the callbacks there.
+ * One network request the broker holds for a (slot, type), and what it knows about the network that
+ * satisfies it. Used only on the broker's looper thread; ConnectivityManager delivers the callbacks
+ * there.
  */
 final class PdnTracker extends ConnectivityManager.NetworkCallback {
     /** Called on the looper thread when the tracker's reportable state changes. */
@@ -41,22 +40,25 @@ final class PdnTracker extends ConnectivityManager.NetworkCallback {
 
     final int slot;
     final int type;
+
     /** Serial of the latest bring-up the daemon sent for this (slot, type). */
     int serial;
+
     /** The subscription the request carries, or INVALID_SUBSCRIPTION_ID. */
     int subId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
+
     /** True once the request is filed with ConnectivityManager. */
     boolean filed;
+
     /** The last PdnInfo reported up, or null when the network is not up. */
     PdnInfo reported;
+
     /** True after the network was lost, until it is up again. */
     boolean lost;
 
     private final Listener mListener;
-    private boolean mClosed;
-    private Network mNetwork;
-    private NetworkCapabilities mCapabilities;
-    private LinkProperties mLinkProperties;
+    private final NetworkState<Network, NetworkCapabilities, LinkProperties> mState =
+            new NetworkState<>();
 
     PdnTracker(Listener listener, PdnRequest request) {
         mListener = listener;
@@ -82,21 +84,23 @@ final class PdnTracker extends ConnectivityManager.NetworkCallback {
 
     /** Stops callbacks. The caller unregisters the request if it was filed. */
     void close() {
-        mClosed = true;
-        mNetwork = null;
-        mCapabilities = null;
-        mLinkProperties = null;
+        mState.close();
     }
 
     /**
-     * What to report up, or null if the network is not usable: it must be
-     * available (between onAvailable and onLost), its capabilities and link
-     * properties must be known, and it must be a cellular network with the
-     * requested capability and, when the request named one, the same
+     * What to report up, or null if the network is not usable: it must be available (between
+     * onAvailable and onLost), its capabilities and link properties must be known, and it must be a
+     * cellular network with the requested capability and, when the request named one, the same
      * subscription.
      */
     PdnInfo currentInfo() {
-        if (mNetwork == null || mCapabilities == null || mLinkProperties == null) {
+        Network mNetwork = mState.network();
+        NetworkCapabilities mCapabilities = mState.capabilities();
+        LinkProperties mLinkProperties = mState.links();
+        if (mNetwork == null
+                || mCapabilities == null
+                || mLinkProperties == null
+                || !mState.usable()) {
             return null;
         }
         if (!mCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
@@ -106,7 +110,11 @@ final class PdnTracker extends ConnectivityManager.NetworkCallback {
         }
         List<InetAddress> addresses = new ArrayList<>();
         for (LinkAddress linkAddress : mLinkProperties.getLinkAddresses()) {
-            addresses.add(linkAddress.getAddress());
+            int unusable =
+                    android.system.OsConstants.IFA_F_TENTATIVE
+                            | android.system.OsConstants.IFA_F_DADFAILED
+                            | android.system.OsConstants.IFA_F_DEPRECATED;
+            if ((linkAddress.getFlags() & unusable) == 0) addresses.add(linkAddress.getAddress());
         }
         PdnInfo info = new PdnInfo();
         info.networkHandle = mNetwork.getNetworkHandle();
@@ -127,13 +135,13 @@ final class PdnTracker extends ConnectivityManager.NetworkCallback {
     }
 
     /**
-     * True from onAvailable() until that network's capabilities and link
-     * properties are both known. ConnectivityService delivers them in the same
-     * dispatch as onAvailable (ConnectivityManager's four-argument onAvailable),
-     * so this only spans the calls of one dispatch.
+     * True from onAvailable() until that network's capabilities and link properties are known and
+     * the network is not blocked for this UID. ConnectivityService delivers them in the same
+     * dispatch as onAvailable (ConnectivityManager's four-argument onAvailable), so this only spans
+     * the calls of one dispatch.
      */
     boolean isSettling() {
-        return mNetwork != null && (mCapabilities == null || mLinkProperties == null);
+        return mState.settling();
     }
 
     static boolean sameInfo(PdnInfo a, PdnInfo b) {
@@ -148,48 +156,35 @@ final class PdnTracker extends ConnectivityManager.NetworkCallback {
 
     @Override
     public void onAvailable(Network network) {
-        if (mClosed) {
-            return;
-        }
-        // Capabilities and link properties follow in onCapabilitiesChanged and
-        // onLinkPropertiesChanged before anything is reported.
-        mNetwork = network;
-        mCapabilities = null;
-        mLinkProperties = null;
+        mState.available(network);
     }
 
     @Override
     public void onCapabilitiesChanged(Network network, NetworkCapabilities capabilities) {
-        if (mClosed || !Objects.equals(network, mNetwork)) {
-            return;
-        }
-        mCapabilities = capabilities;
+        if (!mState.capabilities(network, capabilities)) return;
         mListener.onTrackerChanged(this);
     }
 
     @Override
     public void onLinkPropertiesChanged(Network network, LinkProperties linkProperties) {
-        if (mClosed || !Objects.equals(network, mNetwork)) {
-            return;
-        }
-        mLinkProperties = linkProperties;
+        if (!mState.links(network, linkProperties)) return;
         mListener.onTrackerChanged(this);
     }
 
     @Override
+    public void onBlockedStatusChanged(Network network, boolean blocked) {
+        if (mState.blocked(network, blocked)) mListener.onTrackerChanged(this);
+    }
+
+    @Override
     public void onLost(Network network) {
-        if (mClosed || !Objects.equals(network, mNetwork)) {
-            return;
-        }
-        mNetwork = null;
-        mCapabilities = null;
-        mLinkProperties = null;
+        if (!mState.lost(network)) return;
         mListener.onTrackerLost(this);
     }
 
     @Override
     public void onUnavailable() {
-        if (mClosed) {
+        if (mState.closed()) {
             return;
         }
         mListener.onTrackerUnavailable(this);
@@ -197,7 +192,11 @@ final class PdnTracker extends ConnectivityManager.NetworkCallback {
 
     @Override
     public String toString() {
-        return "slot=" + slot + " type=" + (type == PdnType.EMERGENCY ? "EMERGENCY" : "IMS")
-                + " serial=" + serial;
+        return "slot="
+                + slot
+                + " type="
+                + (type == PdnType.EMERGENCY ? "EMERGENCY" : "IMS")
+                + " serial="
+                + serial;
     }
 }
