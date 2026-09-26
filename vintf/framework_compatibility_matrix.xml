@@ -1,0 +1,17 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The DiamaneOS Project -->
+<!--
+     Framework compatibility matrix entry: the system_ext IMS network broker
+     uses the vendor IMS DCM daemon's IImsDcm/default. Add this file to the
+     device's DEVICE_FRAMEWORK_COMPATIBILITY_MATRIX_FILE list.
+-->
+<compatibility-matrix version="1.0" type="framework">
+    <hal format="aidl">
+        <name>vendor.diamaneos.hardware.imsdcm</name>
+        <version>1</version>
+        <interface>
+            <name>IImsDcm</name>
+            <instance>default</instance>
+        </interface>
+    </hal>
+</compatibility-matrix>

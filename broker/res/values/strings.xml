@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     SPDX-License-Identifier: Apache-2.0
+     Copyright 2026 The DiamaneOS Project
+-->
+<resources>
+    <!-- Name shown in Settings > Apps for the IMS network broker. [CHAR LIMIT=40] -->
+    <string name="app_name">IMS network broker</string>
+</resources>

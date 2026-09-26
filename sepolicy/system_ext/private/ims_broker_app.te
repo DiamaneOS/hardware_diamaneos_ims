@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The DiamaneOS Project
+# IMS network broker (org.diamaneos.imsbroker, system_ext privileged app,
+# signed with the default application key, selected by seapp_contexts). It
+# files IMS and EIMS network requests with ConnectivityManager, looks up slot
+# subscriptions with SubscriptionManager, and talks binder with the vendor DCM
+# daemon (vendor side: sepolicy/vendor/ims_broker_app.te). No network, no
+# modem, no other vendor service.
+typeattribute diamaneos_ims_broker_app coredomain;
+app_domain(diamaneos_ims_broker_app)
+binder_use(diamaneos_ims_broker_app)
+
+# ConnectivityManager (connectivity) and the services every app process uses
+# are app_api_service; SubscriptionManager.getSubscriptionId() asks isub,
+# which is radio_service.
+allow diamaneos_ims_broker_app { app_api_service radio_service }:service_manager find;
+
+# Own app data (device-protected storage; the app is directBootAware).
+allow diamaneos_ims_broker_app app_data_file:dir create_dir_perms;
+allow diamaneos_ims_broker_app app_data_file:{ file lnk_file } create_file_perms;
+
+# No sockets beyond the local ones every app has: it sends no traffic and
+# never speaks QMI.
+neverallow diamaneos_ims_broker_app self:{
+  tcp_socket udp_socket rawip_socket packet_socket qipcrtr_socket
+} *;

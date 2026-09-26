@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     SPDX-License-Identifier: Apache-2.0
+     Copyright 2026 The DiamaneOS Project
+
+     seinfo for the IMS network broker. The signer is the build's default
+     application key (@DIAMANEOS_RELEASE in keys.conf: testkey in the unsigned
+     build; sign_target_files_apks replaces it with releasekey in every
+     *mac_permissions.xml). Other apps signed with that key keep seinfo
+     "default": the package stanza limits this seinfo to one package.
+-->
+<policy>
+    <signer signature="@DIAMANEOS_RELEASE">
+        <package name="org.diamaneos.imsbroker">
+            <seinfo value="diamaneos_ims_broker" />
+        </package>
+    </signer>
+</policy>

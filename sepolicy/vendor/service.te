@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The DiamaneOS Project
+# vendor.diamaneos.hardware.imsdcm.IImsDcm/default. Only the daemon may add it
+# (add_service in imsdcm.te) and only the broker is granted find;
+# protected_service keeps untrusted apps from ever being granted it.
+type diamaneos_imsdcm_service, hal_service_type, protected_service, service_manager_type;

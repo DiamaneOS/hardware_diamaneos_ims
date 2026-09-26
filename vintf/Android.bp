@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The DiamaneOS Project
+
+// VINTF and init glue of the IMS DCM daemon. The daemon's binary module
+// installs them with
+//     vintf_fragment_modules: ["vendor.diamaneos.hardware.imsdcm.xml"],
+//     required: ["imsdcmd.rc"],
+// The framework compatibility matrix entry (framework_compatibility_matrix.xml)
+// and the vendor user (config.fs) are device make variables:
+// DEVICE_FRAMEWORK_COMPATIBILITY_MATRIX_FILE and TARGET_FS_CONFIG_GEN.
+
+vintf_fragment {
+    name: "vendor.diamaneos.hardware.imsdcm.xml",
+    src: "vendor.diamaneos.hardware.imsdcm.xml",
+    vendor: true,
+}
+
+prebuilt_etc {
+    name: "imsdcmd.rc",
+    src: "imsdcmd.rc",
+    sub_dir: "init",
+    vendor: true,
+}

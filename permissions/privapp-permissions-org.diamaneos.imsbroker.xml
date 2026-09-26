@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     SPDX-License-Identifier: Apache-2.0
+     Copyright 2026 The DiamaneOS Project
+
+     Privileged permission of the IMS network broker (org.diamaneos.imsbroker,
+     /system_ext/priv-app). It is signed with the default application key, not
+     the platform key, so this list is its only source of privileged
+     permissions.
+
+     Granted:
+       CONNECTIVITY_USE_RESTRICTED_NETWORKS (signature|privileged): IMS and
+         EIMS requests are restricted (NetworkRequest.Builder.build() drops
+         NOT_RESTRICTED), and ConnectivityService.enforceNetworkRequestPermissions
+         then requires this permission for them.
+     The broker requests no other privileged permission.
+-->
+<permissions>
+    <privapp-permissions package="org.diamaneos.imsbroker">
+        <permission name="android.permission.CONNECTIVITY_USE_RESTRICTED_NETWORKS" />
+    </privapp-permissions>
+</permissions>

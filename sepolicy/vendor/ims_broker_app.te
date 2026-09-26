@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The DiamaneOS Project
+# Vendor-side grants for the IMS network broker (domain
+# diamaneos_ims_broker_app, declared in sepolicy/system_ext/public): it finds
+# the DCM daemon's service, registers its callback and reports network state;
+# the daemon calls back (imsdcm.te). Same pattern as the device tree's
+# telephony/qcril_audio.te for the QCRIL audio messenger.
+allow diamaneos_ims_broker_app diamaneos_imsdcm_service:service_manager find;
+binder_call(diamaneos_ims_broker_app, diamaneos_imsdcm)

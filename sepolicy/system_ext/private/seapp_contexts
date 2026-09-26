@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The DiamaneOS Project
+# The IMS network broker. All three selectors must match: the seinfo that
+# mac_permissions.xml gives only to this package signed with the default
+# application key, the package name, and installation as a privileged app
+# (so a newly installed app never matches; an update must carry the same
+# signature). Its own domain, not priv_app or platform_app.
+user=_app seinfo=diamaneos_ims_broker isPrivApp=true name=org.diamaneos.imsbroker domain=diamaneos_ims_broker_app type=app_data_file levelFrom=all
