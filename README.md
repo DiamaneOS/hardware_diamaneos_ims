@@ -1,24 +1,46 @@
-# DiamaneOS IMS data connection
+# DiamaneOS emergency connectivity
 
-Install this repository at `hardware/diamaneos/ims` in the Android source workspace.
+Android source location: `hardware/diamaneos/ims`.
 
-This repository will bring up the IMS and emergency data connections that VoLTE
-needs on Qualcomm devices, with DiamaneOS code in place of Qualcomm's closed
-connectivity components. It is not yet part of any build or product.
+This is a development implementation, **not a qualified emergency-calling or
+AML service**. It has not been deployed or tested with a carrier or emergency
+call centre. Host simulations and Android API compilation cover only the
+boundaries documented in [verification](docs/verification.md).
 
-What is here:
+- `dcm/` is a memory-safe QMI DCM codec and state machine. It shares a broker
+  request across IP families, separates SIMs and IMS/emergency networks,
+  rejects stale reports and bounds sessions and messages.
+- `daemon/` adapts that core to QRTR and Android Binder. It uses a dedicated
+  vendor UID, enforcing SELinux, a bounded event queue and an arm64 seccomp
+  allowlist. Device configuration must identify the modem node explicitly.
+- `broker/` requests only Android telephony IMS/EIMS networks (including
+  carrier IWLAN, which Android exposes with the cellular transport capability). It has no Internet,
+  location or SMS permission. It closes requests on daemon loss and refuses
+  stale callback epochs or subscription changes.
+- `aml/` is a **separate app and UID**. It receives trusted outgoing emergency-call/SMS
+  events, collects GNSS briefly, and supports bounded HTTPS/data-SMS messages.
+  It cannot place, route or cancel a call, and has no modem access. Production
+  routes are intentionally empty until verified against a receiver profile.
+- `integration/` contains the small framework event-bridge patch and a tool
+  for creating an emergency-APN candidate from authenticated stock XML. Neither
+  is automatically applied. The bridge is maintained in the DiamaneOS frameworks-base fork.
 
-- `aidl/`: `vendor.diamaneos.hardware.imsdcm`, the VINTF-stable interface between
-  the vendor service and the broker app.
-- `broker/`: `org.diamaneos.imsbroker`, a small system_ext privileged app that asks
-  Android for the IMS or emergency network for a SIM and reports its handle,
-  addresses and MTU. It holds one privileged permission
-  (`CONNECTIVITY_USE_RESTRICTED_NETWORKS`), has no internet access, runs before
-  first unlock and cannot be disabled by users.
-- `permissions/`: the privileged-permission allowlist and sysconfig entry.
-- `sepolicy/`: vendor and system_ext policy for the service and the broker.
-- `vintf/`: the manifest and compatibility-matrix fragments, the service's init
-  file and its UID.
+The modem and the existing IMS telephony service still implement IMS signalling
+and voice. This repository supplies their data-connection path; it does not
+replace the entire modem IMS stack. See [Wi-Fi calling integration](docs/wifi-calling.md)
+for the separate IWLAN stack and its qualification requirements.
 
-The vendor service itself is not written yet. Until it is, nothing here should
-be added to a product.
+## Development
+
+With Rust/Cargo and JDK 17 or later:
+
+```sh
+cargo fetch --locked
+./tests/run-host-tests.sh
+```
+
+Tests use synthetic identities and in-memory transports. They never use ADB,
+place a call, publish a QRTR service, send SMS, or contact an AML endpoint.
+
+See [architecture](docs/architecture.md), [protocol](docs/dcm-protocol.md),
+[Android integration](docs/integration.md), and [AML receiver configuration](docs/aml-profile.md).

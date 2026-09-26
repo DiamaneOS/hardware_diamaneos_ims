@@ -1,0 +1,12 @@
+{
+  "iwlan": {
+    "repository": "https://android.googlesource.com/platform/packages/services/Iwlan",
+    "revision": "ddf0eb7f277ea6a5a62c63678d17218714f38071",
+    "downstream": "https://github.com/DiamaneOS/platform_packages_services_Iwlan"
+  },
+  "network_selection": {
+    "path": "packages/services/QualifiedNetworksService",
+    "revision": "f1500926b882a189c7c5772368835d5de700b34f"
+  },
+  "status": "source integration candidate; native permissions, policy, modem/carrier qualification pending"
+}
