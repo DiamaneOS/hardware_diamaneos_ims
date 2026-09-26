@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The DiamaneOS Project
+
+// IMS network broker: a system_ext privileged app that files the IMS and
+// emergency network requests the vendor IMS DCM daemon asks for.
+//
+// Signing: no certificate property, so the build signs it with the default
+// application key (testkey in the unsigned build, releasekey after
+// sign_target_files_apks), like other ordinary apps. Never the platform key.
+// Its SELinux domain is keyed to that key and its package name
+// (sepolicy/system_ext/private/mac_permissions.xml, seapp_contexts).
+//
+// API level: module_current, the narrowest SDK that has the module-lib
+// ServiceManager.isDeclared()/waitForDeclaredService() used to reach the
+// VINTF service. Soong then marks the app usesNonSdkApi, which lifts runtime
+// hidden-API enforcement for system apps (ApplicationInfo
+// .isAllowedToUseHiddenApis); no @hide API is used.
+
+android_app {
+    name: "DiamaneOSImsBroker",
+    srcs: ["src/**/*.java"],
+    resource_dirs: ["res"],
+    static_libs: ["vendor.diamaneos.hardware.imsdcm-V1-java"],
+    sdk_version: "module_current",
+    system_ext_specific: true,
+    privileged: true,
+    required: [
+        "privapp-permissions-org.diamaneos.imsbroker.xml",
+        "sysconfig-org.diamaneos.imsbroker.xml",
+    ],
+}
+
+java_test_host {
+    name: "DiamaneOSImsBrokerHostTests",
+    srcs: [
+        "src/org/diamaneos/imsbroker/Addresses.java",
+        "tests/src/**/*.java",
+    ],
+    static_libs: ["junit"],
+    test_options: {
+        unit_test: true,
+    },
+}

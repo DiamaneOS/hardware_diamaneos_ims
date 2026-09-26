@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     SPDX-License-Identifier: Apache-2.0
+     Copyright 2026 The DiamaneOS Project
+
+     The IMS network broker carries VoLTE's and emergency IMS's network
+     requests, so the user cannot disable it by mistake. SystemConfig
+     "prevent-disable" adds the package to PackageManagerService's required
+     system packages, which setApplicationEnabledSetting refuses to disable
+     while the package is a system app.
+-->
+<config>
+    <prevent-disable package="org.diamaneos.imsbroker" />
+</config>

@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The DiamaneOS Project
+# App domain of the IMS network broker (org.diamaneos.imsbroker). Public so
+# that the vendor policy (sepolicy/vendor) can bind the DCM daemon's service
+# and callbacks to exactly this domain.
+type diamaneos_ims_broker_app, domain;

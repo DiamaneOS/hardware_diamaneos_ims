@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The DiamaneOS Project
+#
+# IMS DCM daemon: serves the modem's QMI IMS DCM service and asks the IMS
+# network broker for the IMS and emergency networks.
+#
+# - Own vendor user and group (config.fs), no supplementary groups, no
+#   capabilities (an empty capabilities list drops them all for a non-root
+#   user).
+# - Not critical: a crash must never reboot the phone. init restarts it.
+# - disabled, and no "interface aidl" line: only the triggers below start it,
+#   so servicemanager cannot start it past the kill switch when the broker
+#   waits for its service.
+service vendor.imsdcmd /vendor/bin/imsdcmd
+    class main
+    user vendor_imsdcm
+    group vendor_imsdcm
+    capabilities
+    disabled
+
+# Start after persistent properties are loaded (before the first unlock on
+# FBE), so a set kill switch is seen before the DCM service is ever published.
+# The build sets persist.vendor.diamaneos.ims.dcm_kill=0 as the default; an
+# absent value leaves the daemon stopped.
+on property:ro.persistent_properties.ready=true && property:persist.vendor.diamaneos.ims.dcm_kill=0
+    start vendor.imsdcmd
+
+on property:persist.vendor.diamaneos.ims.dcm_kill=1
+    stop vendor.imsdcmd

@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The DiamaneOS Project
+# IMS DCM daemon (/vendor/bin/imsdcmd, user vendor_imsdcm, no supplementary
+# groups, no capabilities). It serves the modem's QMI IMS DCM service
+# (0x302) over QRTR and asks the broker app (diamaneos_ims_broker_app) for
+# the IMS and emergency networks through its own VINTF service,
+# vendor.diamaneos.hardware.imsdcm.IImsDcm/default.
+#
+# It gets exactly that: a QRTR socket, its binder service, calls to the
+# broker's callback and reads of its own properties. No network domain, no
+# files, no property writes, no other binder peers, no capabilities.
+type diamaneos_imsdcm, domain;
+type diamaneos_imsdcm_exec, exec_type, vendor_file_type, file_type;
+init_daemon_domain(diamaneos_imsdcm)
+
+# Binder: servicemanager, its own service, and the broker's IPdnBroker
+# callback (a reference only the daemon holds).
+binder_use(diamaneos_imsdcm)
+add_service(diamaneos_imsdcm, diamaneos_imsdcm_service)
+binder_call(diamaneos_imsdcm, diamaneos_ims_broker_app)
+
+# QRTR, without ioctls: binding an ephemeral port, publishing the service to
+# the kernel name service and exchanging QMI messages are plain socket calls.
+allow diamaneos_imsdcm self:qipcrtr_socket create_socket_perms_no_ioctl;
+
+# Kill switches and the build-time emergency policy (property.te).
+get_prop(diamaneos_imsdcm, diamaneos_imsdcm_prop)
+
+# Keep it that way.
+neverallow diamaneos_imsdcm self:global_capability_class_set *;
+neverallow diamaneos_imsdcm self:global_capability2_class_set *;
+neverallow diamaneos_imsdcm self:{
+  tcp_socket udp_socket rawip_socket packet_socket tipc_socket
+  netlink_socket netlink_route_socket netlink_generic_socket
+} *;
+# coredump_file (userdebug) and method_trace_data_file (coverage builds) are
+# granted to every domain by the platform policy.
+neverallow diamaneos_imsdcm {
+  data_file_type
+  -coredump_file
+  -method_trace_data_file
+}:file { create write append rename link unlink setattr };
+neverallow diamaneos_imsdcm property_type:property_service set;
+# Binder peers: servicemanager and the broker only. system_server and su are
+# reachable from every domain in the platform policy.
+neverallow diamaneos_imsdcm {
+  domain
+  -diamaneos_ims_broker_app
+  -servicemanager
+  -system_server
+  -su
+}:binder call;
+neverallow {
+  domain
+  -diamaneos_ims_broker_app
+  -servicemanager
+  -su
+} diamaneos_imsdcm:binder call;
