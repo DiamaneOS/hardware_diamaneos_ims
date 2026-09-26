@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The DiamaneOS Project
+
+// The one interface between the vendor IMS DCM daemon (Rust, server of
+// IImsDcm/default) and the system_ext broker app (Java, client, implements
+// IPdnBroker). VINTF-stable because it crosses the system/vendor boundary.
+//
+// Versioning:
+// - Until the first freeze the interface is V1 in development. After editing
+//   an .aidl file, refresh the API dump with
+//     m vendor.diamaneos.hardware.imsdcm-update-api
+//   (aidl_api/vendor.diamaneos.hardware.imsdcm/current is compared with
+//   aidl --checkapi=equal on every build).
+// - Freeze V1 before the daemon and the broker ship in a release build:
+//     m vendor.diamaneos.hardware.imsdcm-freeze-api
+//   This writes aidl_api/.../1 with its .hash and sets versions_with_info and
+//   frozen: true below. Commit the generated files unchanged.
+// - Later changes are additive only (new methods, new fields at the end, new
+//   enum values) and become V2; the daemon and the broker check
+//   getInterfaceVersion() before using anything newer than V1.
+
+aidl_interface {
+    name: "vendor.diamaneos.hardware.imsdcm",
+    owner: "diamaneos",
+    vendor_available: true,
+    srcs: ["vendor/diamaneos/hardware/imsdcm/*.aidl"],
+    stability: "vintf",
+    backend: {
+        cpp: {
+            enabled: false,
+        },
+        ndk: {
+            enabled: false,
+        },
+        java: {
+            // Generated stubs call Binder.markVintfStability(), a system API.
+            sdk_version: "system_current",
+        },
+        rust: {
+            enabled: true,
+        },
+    },
+}

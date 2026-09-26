@@ -1,0 +1,10 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 The DiamaneOS Project -->
+<!-- Device manifest fragment: the IMS DCM daemon serves IImsDcm/default. -->
+<manifest version="1.0" type="device">
+    <hal format="aidl">
+        <name>vendor.diamaneos.hardware.imsdcm</name>
+        <version>1</version>
+        <fqname>IImsDcm/default</fqname>
+    </hal>
+</manifest>
