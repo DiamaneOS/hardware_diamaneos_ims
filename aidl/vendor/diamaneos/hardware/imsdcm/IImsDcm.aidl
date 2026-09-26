@@ -17,7 +17,8 @@ import vendor.diamaneos.hardware.imsdcm.PdnRequest;
  * needs the Android IMS (or emergency) network, which only an app holding
  * CONNECTIVITY_USE_RESTRICTED_NETWORKS can request. That app, the broker, is
  * the only client of this service: SELinux lets no other domain call the
- * daemon, and the daemon also checks the caller's SELinux type.
+ * daemon, and the daemon pins the authorized registration UID. The daemon refuses
+ * permissive SELinux because vendor Binder does not expose the caller SID.
  *
  * Flow: the broker registers itself with setBroker(). The daemon then calls
  * IPdnBroker.bringUp() and IPdnBroker.release(); the broker answers each
@@ -36,7 +37,8 @@ interface IImsDcm {
      * returns, the daemon calls broker.bringUp() for every PDN the modem
      * currently wants.
      *
-     * @throws EX_SECURITY if the caller is not the broker's SELinux domain.
+     * @throws EX_SECURITY for an invalid or different registered app UID.
+     * SELinux permits calls from the broker domain only.
      */
     void setBroker(in IPdnBroker broker);
 

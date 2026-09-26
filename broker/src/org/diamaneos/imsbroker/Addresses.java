@@ -13,11 +13,10 @@ import java.util.List;
 /**
  * Picks the one address per IP family that the broker reports to the daemon.
  *
- * <p>The rule is stock CneApp's (RatInfo.setLinkProperties, classes.dex code at
- * 0x014dd8): walk LinkProperties.getLinkAddresses() in order, skip
- * link-local and loopback addresses, and keep the last remaining address of each
- * family. A cellular IMS or emergency network normally carries at most one
- * address per family, so "last" and "first" agree there.
+ * <p>The rule is stock CneApp's (RatInfo.setLinkProperties, classes.dex code at 0x014dd8): walk
+ * LinkProperties.getLinkAddresses() in order, skip link-local and loopback addresses, and keep the
+ * last remaining address of each family. A cellular IMS or emergency network normally carries at
+ * most one address per family, so "last" and "first" agree there.
  *
  * <p>Plain java.net only, so it is unit-tested on the host.
  */
@@ -41,7 +40,10 @@ final class Addresses {
         for (InetAddress address : addresses) {
             if (family.isInstance(address)
                     && !address.isLinkLocalAddress()
-                    && !address.isLoopbackAddress()) {
+                    && !address.isLoopbackAddress()
+                    && !address.isAnyLocalAddress()
+                    && !address.isMulticastAddress()
+                    && !address.getHostAddress().equals("255.255.255.255")) {
                 picked = address;
             }
         }
