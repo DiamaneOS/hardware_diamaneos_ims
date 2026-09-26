@@ -20,7 +20,7 @@ parcelable PdnRequest {
 
     /**
      * Chosen by the daemon for each bring-up and echoed in every report about
-     * it. Any value; the broker only compares it for equality.
+     * it. A positive generation; the broker compares it for equality.
      */
     int serial;
 }
