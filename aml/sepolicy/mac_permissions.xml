@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<policy><signer signature="@DIAMANEOS_RELEASE"><package name="org.diamaneos.emergencylocation"><seinfo value="diamaneos_emergency_location" /></package></signer></policy>
