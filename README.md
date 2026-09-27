@@ -1,53 +1,45 @@
-# DiamaneOS emergency connectivity
+# DiamaneOS IMS connectivity
 
 Android source location: `hardware/diamaneos/ims`.
 
-This is a development implementation, **not a qualified emergency-calling or
-AML service**. It has not been deployed or tested with a carrier or emergency
-call centre. Host simulations and Android API compilation cover only the
-boundaries documented in [verification](docs/verification.md).
+This repository provides the modem's IMS and emergency data-connection path and
+optional Wi-Fi link reporting for native Qualcomm IWLAN. It
+does not replace the existing Android IMS service or the modem's IMS signalling,
+voice and carrier emergency-location implementation. Native and carrier behavior
+remain subject to the verification limits in [verification](docs/verification.md).
 
-- `dcm/` is a memory-safe QMI DCM codec and state machine. It shares a broker
-  request across IP families, separates SIMs and IMS/emergency networks,
-  rejects stale reports and bounds sessions and messages.
-- `daemon/` adapts that core to QRTR and Android Binder. It uses a dedicated
-  vendor UID, enforcing SELinux, a bounded event queue and an arm64 seccomp
-  allowlist. Device configuration must identify the modem node explicitly.
-- `broker/` requests only Android telephony IMS/EIMS networks (including
-  carrier IWLAN, which Android exposes with the cellular transport capability). It has no Internet,
-  location or SMS permission. It closes requests on daemon loss and refuses
-  stale callback epochs or subscription changes.
-- `aml/` is a **separate app and UID**. It receives trusted outgoing emergency-call/SMS
-  events, collects GNSS briefly, and supports bounded HTTPS/data-SMS messages.
-  It cannot place, route or cancel a call, and has no modem access. Production
-  routes are intentionally empty until verified against a receiver profile.
-- `integration/` contains the small framework event-bridge patch and a tool
-  for creating an emergency-APN candidate from authenticated stock XML. Neither
-  is automatically applied. The bridge is maintained in the DiamaneOS frameworks-base fork.
+- `dcm/`: memory-safe QMI DCM codec and bounded connection state machine, with
+  separate SIMs, shared address-family requests and reserved emergency capacity.
+- `daemon/`: QRTR/Binder adapter, dedicated UID, enforcing policy, bounded queues
+  and arm64 syscall filter. Device configuration identifies the modem explicitly.
+- `broker/`: requests Android telephony IMS/EIMS networks, including carrier
+  IWLAN as exposed by telephony. It has no Internet, location or SMS permission.
+- `wlan/`: bounded DSD protocol and acknowledgement state machine.
+- `wlan-runtime/`: isolated QRTR client and authenticated Binder snapshot adapter.
+- `wlan-observer/`: passive observation of the connected Wi-Fi link, with no
+  Internet, location or phone-state permission.
+- `integration/`: emergency-APN comparison tooling and source IWLAN provenance.
 
-The modem and the existing IMS telephony service still implement IMS signalling
-and voice. This repository supplies their data-connection path; it does not
-replace the entire modem IMS stack. See [Wi-Fi calling integration](docs/wifi-calling.md)
-for the separate IWLAN stack and its qualification requirements.
+VoWiFi integration is described in [Wi-Fi calling](docs/wifi-calling.md).
+AML (Advanced Mobile Location) is not part of DiamaneOS. Its app, in
+[platform_packages_apps_EmergencyLocation](https://github.com/DiamaneOS/platform_packages_apps_EmergencyLocation),
+is not in the build and is not needed to build or test this repository.
 
 ## Tests
 
-With Rust/Cargo and JDK 17 or later:
+Needs Rust/Cargo, Python 3 and JDK 17 or later:
 
 ```sh
 cargo fetch --locked
 ./tests/run-host-tests.sh
 ```
 
-Tests use synthetic identities and in-memory transports. They never use ADB,
-place a call, publish a QRTR service, send SMS, or contact an AML endpoint.
+- Host tests use synthetic inputs: no QRTR service, calls, SMS or emergency
+  endpoints.
+- `tests/device-check --serial "$ANDROID_SERIAL" --iwlan qti` is a read-only
+  inventory of Android prerequisites for the native Qualcomm path.
+  - `--iwlan aosp` is only for a product selecting that alternative.
+  - It does not test carrier registration or delivery.
 
-See [architecture](docs/architecture.md), [protocol](docs/dcm-protocol.md),
-[Android integration](docs/integration.md), and [AML receiver configuration](docs/aml-profile.md).
-
-## Test harness
-
-The [emergency connectivity lab](lab/README.md) runs configurable country scenarios
-using production AML logic, validates receiver profiles, exercises HTTPS on
-loopback, and builds a separate permission-free Android lab APK. Neither the lab
-nor passing scenarios establishes carrier or emergency-centre coverage.
+See also [architecture](docs/architecture.md), [protocol](docs/dcm-protocol.md)
+and [Android integration](docs/integration.md).

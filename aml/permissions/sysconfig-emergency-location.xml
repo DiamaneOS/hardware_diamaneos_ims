@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- SPDX-License-Identifier: Apache-2.0 -->
-<config>
-    <allow-ignore-location-settings package="org.diamaneos.emergencylocation" attributionTag="emergency" />
-    <prevent-disable package="org.diamaneos.emergencylocation" />
-</config>
