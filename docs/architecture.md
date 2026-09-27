@@ -5,7 +5,9 @@ Each process runs as its own identity:
 | Component | Privilege | Excluded capabilities |
 | --- | --- | --- |
 | IMS DCM daemon | Vendor UID 2990, QRTR to the configured modem, own Binder service | Internet, SMS, location, arbitrary Binder peers, file writes, capabilities |
-| IMS broker | `CONNECTIVITY_USE_RESTRICTED_NETWORKS` | Internet traffic, modem sockets, location, SMS |
+| IMS broker | `CONNECTIVITY_USE_RESTRICTED_NETWORKS` | Internet permission, direct IP/modem sockets, location, SMS |
+| Wi-Fi reporter (optional) | UID 2991, configured modem DSD endpoint, private Binder service | Internet, location, SMS, routing changes, capabilities |
+| Wi-Fi observer (optional) | Passive Wi-Fi/network reads, `RADIO_SCAN_WITHOUT_LOCATION` | Internet permission, scans, location, phone-state and network-setting permissions |
 
 The daemon owns all protocol state on one thread. Binder callbacks enqueue bounded
 messages. Session IDs are bounded to 20–98, with capacity reserved for emergency
@@ -33,6 +35,20 @@ notifications and queued old callbacks cannot affect its successor. Network
 replacement waits for matching capabilities and link properties before reporting. A blocked network is not advertised as usable.
 Tentative, failed-DAD, deprecated, link-local, multicast and unspecified addresses
 are not advertised.
+
+- A fresh callback object per daemon connection, so stale death notifications
+  and queued old callbacks cannot affect its successor.
+- Network replacement waits for matching capabilities and link properties
+  before reporting.
+- Reports only restricted cellular IMS/EIMS metadata. Its own UID firewall or
+  VPN block does not gate the modem bearer.
+- No INTERNET permission, no IP sockets, no application access or VPN bypass.
+- Both address consumers share Android's preferred-address flag rule: failed-DAD
+  and deprecated addresses are rejected, tentative ones need the optimistic
+  flag, and link-local, multicast, loopback and unspecified addresses stay
+  excluded. This changes eligibility only, not address order.
+- The socket restrictions do not rule out indirect network paths through
+  permitted Android IPC. Audit both permission and Binder boundaries.
 
 ## Wi-Fi observer and reporter
 

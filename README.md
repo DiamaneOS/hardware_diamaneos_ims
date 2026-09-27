@@ -13,7 +13,9 @@ remain subject to the verification limits in [verification](docs/verification.md
 - `daemon/`: QRTR/Binder adapter, dedicated UID, enforcing policy, bounded queues
   and arm64 syscall filter. Device configuration identifies the modem explicitly.
 - `broker/`: requests Android telephony IMS/EIMS networks, including carrier
-  IWLAN as exposed by telephony. It has no Internet, location or SMS permission.
+  IWLAN as exposed by telephony. It declares the revocable Network permission
+  for Android's network-policy accounting; SELinux forbids direct IP/modem
+  sockets. It has no location or SMS permission.
 - `wlan/`: bounded DSD protocol and acknowledgement state machine.
 - `wlan-runtime/`: isolated QRTR client and authenticated Binder snapshot adapter.
 - `wlan-observer/`: passive observation of the connected Wi-Fi link, with no
@@ -21,6 +23,11 @@ remain subject to the verification limits in [verification](docs/verification.md
 - `integration/`: emergency-APN comparison tooling and source IWLAN provenance.
 
 VoWiFi integration is described in [Wi-Fi calling](docs/wifi-calling.md).
+The opt-in [Wi-Fi reporter candidate](docs/wlan-reporting-design.md) separates
+Android observations from modem access. It has host-tested protocol/lifecycle
+logic and Android adapters; native and device qualification are required before
+release. It is selected only by explicitly including `wlan-product.mk` and
+`wlan-board.mk` alongside the native Qualcomm IWLAN path.
 AML (Advanced Mobile Location) is not part of DiamaneOS. Its app, in
 [platform_packages_apps_EmergencyLocation](https://github.com/DiamaneOS/platform_packages_apps_EmergencyLocation),
 is not in the build and is not needed to build or test this repository.

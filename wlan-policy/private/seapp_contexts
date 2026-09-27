@@ -1,0 +1,2 @@
+# SPDX-License-Identifier: Apache-2.0
+user=_app seinfo=diamaneos_wlan_observer isPrivApp=true name=org.diamaneos.wlanobserver domain=diamaneos_wlan_observer type=app_data_file levelFrom=all
