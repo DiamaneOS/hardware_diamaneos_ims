@@ -14,8 +14,8 @@ stack in a product.
    `DIAMANEOS_IMS_SLOTS` from the product, and include `ims-product.mk`. It
    emergency PDN service by default; kill switches are diagnostic controls only.
 4. Build `imsdcmd`, `DiamaneOSImsBroker` and the policy with ordinary hardening
-   neverallow checks enabled. Update and freeze AIDL V1 using the platform AIDL
-   tasks before release. The current interface is still unfrozen.
+   and neverallow checks. AIDL V1 is frozen and hash-checked locally. The
+   platform build must also run its native API compatibility checks.
 5. Compare emergency carrier options and generate a candidate APN merge with
    `integration/merge_emergency_apns.py`. It never installs or overwrites inputs.
    Review duplicate precedence and any mixed-use row before adopting the output.
