@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+"""Portable local harness. No adb, phone state changes or external endpoints."""
+import argparse
+import atexit
+import tempfile
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+CORE = ROOT / 'aml/src/org/diamaneos/emergencylocation'
+NAMES = ('AmlMessage', 'AmlSession', 'AmlProfile', 'AmlProfiles', 'HttpsSender', 'TrustedEvent', 'SmsPayload')
+
+def java_tool(name):
+    home = os.environ.get('JAVA_HOME')
+    tool = str(Path(home) / 'bin' / name) if home else shutil.which(name)
+    if not tool:
+        raise ValueError('JDK 17 or newer required; set JAVA_HOME')
+    return tool
+
+def compile_host():
+    parent = ROOT / 'lab/out'
+    parent.mkdir(parents=True, exist_ok=True)
+    output = Path(tempfile.mkdtemp(prefix='host-', dir=parent))
+    # Concurrent matrix/TLS runs must never overwrite each other's class files.
+    atexit.register(shutil.rmtree, output, ignore_errors=True)
+    sources = [CORE / (name + '.java') for name in NAMES]
+    sources += sorted((ROOT / 'lab/src').rglob('*.java'))
+    sources += sorted((ROOT / 'lab/host').rglob('*.java'))
+    subprocess.run([java_tool('javac'), '--release', '17', '-Xlint:all', '-Werror', '-d', str(output), *map(str, sources)], check=True)
+    return output
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest='command', required=True)
+    one = commands.add_parser('run', help='Run a synthetic .properties scenario')
+    one.add_argument('scenario', type=Path)
+    one.add_argument('--output', type=Path)
+    matrix = commands.add_parser('matrix', help='Run bundled scenarios for selected ISO country codes')
+    matrix.add_argument('--countries', default='all', help='all, or comma-separated country codes')
+    matrix.add_argument('--output', type=Path)
+    validate = commands.add_parser('validate-profiles', help='Validate production XML schema, not receiver acceptance')
+    validate.add_argument('profiles', type=Path)
+    args = parser.parse_args()
+    if getattr(args, 'output', None) and args.output.exists():
+        raise ValueError('output already exists; choose a new report path')
+    classes = compile_host()
+    cmd = [java_tool('java'), '-cp', str(classes), 'org.diamaneos.emergencylocation.LabMain', args.command]
+    data = None
+    if args.command == 'run':
+        if args.scenario.stat().st_size > 65536: raise ValueError('scenario exceeds 64 KiB')
+        data = args.scenario.read_bytes()
+    elif args.command == 'matrix':
+        cmd += [str(ROOT / 'lab/scenarios'), args.countries]
+    else:
+        if args.profiles.stat().st_size > 1048576: raise ValueError('profiles exceed 1 MiB')
+        data = args.profiles.read_bytes()
+    result = subprocess.run(cmd, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180)
+    if result.returncode not in (0, 1) or not result.stdout:
+        raise ValueError('scenario or profile validation failed; check field names, types and bounds')
+    records = [json.loads(line) for line in result.stdout.splitlines()]
+    if args.command == 'matrix':
+        report = {'evidence': 'synthetic-production-logic-only', 'real_world_validated': False,
+                  'scenarios': len(records), 'countries': len({r['country'] for r in records}),
+                  'passed': sum(r['result'] == 'PASS' for r in records), 'cases': records}
+        summary = {k: v for k, v in report.items() if k != 'cases'}
+    else:
+        report = records[0]; summary = report
+    if getattr(args, 'output', None):
+        with args.output.open('x', encoding='utf-8') as stream: json.dump(report, stream, indent=2); stream.write('\n')
+    print(json.dumps(summary, indent=2))
+    return result.returncode
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
+        print('Harness error: ' + str(error), file=sys.stderr)
+        sys.exit(2)
