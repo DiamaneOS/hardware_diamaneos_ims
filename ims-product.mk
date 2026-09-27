@@ -7,7 +7,9 @@ endif
 ifeq ($(strip $(DIAMANEOS_IMS_SLOTS)),)
 $(error DIAMANEOS_IMS_SLOTS must specify the product's logical SIM slot count)
 endif
-PRODUCT_PACKAGES += imsdcmd DiamaneOSImsBroker
+# TARGET_FS_CONFIG_GEN generates the AID for build-time init verification;
+# bionic/init also need its installed user/group databases at runtime.
+PRODUCT_PACKAGES += imsdcmd DiamaneOSImsBroker passwd_vendor group_vendor
 PRODUCT_VENDOR_PROPERTIES += \
     ro.vendor.diamaneos.ims.modem_node=$(DIAMANEOS_IMS_MODEM_NODE) \
     ro.vendor.diamaneos.ims.slots=$(DIAMANEOS_IMS_SLOTS) \
