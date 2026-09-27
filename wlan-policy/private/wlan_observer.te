@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+type diamaneos_wlan_observer, domain;
+typeattribute diamaneos_wlan_observer coredomain;
+app_domain(diamaneos_wlan_observer)
+binder_use(diamaneos_wlan_observer)
+allow diamaneos_wlan_observer { activity_service connectivity_service wifi_service netpolicy_service power_service thermal_service user_service permission_service package_service }:service_manager find;
+allow diamaneos_wlan_observer diamaneos_wlan_reporter_service:service_manager find;
+binder_call(diamaneos_wlan_observer, diamaneos_wlan_reporter)
+neverallow diamaneos_wlan_observer self:{ tcp_socket udp_socket rawip_socket packet_socket qipcrtr_socket tipc_socket netlink_xfrm_socket } create;
+neverallow diamaneos_wlan_observer self:global_capability_class_set *;
+neverallow diamaneos_wlan_observer self:global_capability2_class_set *;

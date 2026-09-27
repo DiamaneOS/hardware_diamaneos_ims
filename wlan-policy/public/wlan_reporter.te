@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: Apache-2.0
+# Public only so the device's QRTR domain inventory can name this client.
+type diamaneos_wlan_reporter, domain;

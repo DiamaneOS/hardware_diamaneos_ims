@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+aidl_interface {
+    name: "org.diamaneos.wlan",
+    srcs: ["org/diamaneos/wlan/*.aidl"],
+    // Both endpoints ship together in system_ext. This is not a vendor HAL API.
+    unstable: true,
+    backend: {
+        cpp: { enabled: false }, ndk: { enabled: false },
+        java: { sdk_version: "system_current" }, rust: { enabled: true },
+    },
+}

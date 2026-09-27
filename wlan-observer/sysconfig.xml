@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<config>
+    <allow-in-power-save package="org.diamaneos.wlanobserver" />
+    <install-in-user-type package="org.diamaneos.wlanobserver">
+        <install-in user-type="SYSTEM" />
+    </install-in-user-type>
+</config>

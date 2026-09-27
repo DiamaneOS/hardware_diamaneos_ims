@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+service diamaneos.wlanreport /system_ext/bin/wlanreportd ${ro.vendor.diamaneos.ims.modem_node} ${ro.vendor.diamaneos.ims.slots}
+    class late_start
+    user vendor_wlanreport
+    group vendor_wlanreport
+    capabilities
+    restart_period 30
+    disabled
+
+on property:ro.persistent_properties.ready=true
+    start diamaneos.wlanreport

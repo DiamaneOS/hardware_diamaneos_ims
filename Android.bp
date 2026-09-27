@@ -9,12 +9,12 @@ license {
 }
 rust_library {
     name: "libdiamaneos_ims_dcm", crate_name: "diamaneos_ims_dcm",
-    srcs: ["dcm/src/lib.rs"], edition: "2021", vendor: true,
+    srcs: ["dcm/src/lib.rs"], edition: "2021", vendor_available: true,
     host_supported: true,
 }
 rust_library {
     name: "libdiamaneos_ims_runtime", crate_name: "diamaneos_ims_runtime",
-    srcs: ["daemon/src/lib.rs"], edition: "2021", vendor: true,
+    srcs: ["daemon/src/lib.rs"], edition: "2021", vendor_available: true,
     rustlibs: ["libdiamaneos_ims_dcm", "liblibc"],
 }
 rust_binary {
@@ -29,4 +29,22 @@ rust_test_host {
     name: "DiamaneOSImsDcmHostTests", srcs: ["dcm/tests/simulation.rs"], edition: "2021",
     rustlibs: ["libdiamaneos_ims_dcm"],
     test_options: { unit_test: true },
+}
+rust_library {
+    name: "libdiamaneos_wlan_reporting", crate_name: "diamaneos_wlan_reporting",
+    srcs: ["wlan/src/lib.rs"], edition: "2021", host_supported: true,
+    rustlibs: ["libdiamaneos_ims_dcm"],
+}
+rust_library {
+    name: "libdiamaneos_wlan_runtime", crate_name: "diamaneos_wlan_runtime",
+    srcs: ["wlan-runtime/src/lib.rs"], edition: "2021", host_supported: true,
+    rustlibs: ["libdiamaneos_wlan_reporting"],
+}
+rust_binary {
+    name: "wlanreportd", srcs: ["wlan-runtime/src/main.rs"], edition: "2021",
+    system_ext_specific: true,
+    rustlibs: ["libbinder_rs", "liblibc", "libdiamaneos_ims_dcm",
+        "libdiamaneos_ims_runtime", "libdiamaneos_wlan_reporting",
+        "libdiamaneos_wlan_runtime", "org.diamaneos.wlan-rust"],
+    init_rc: ["wlan-runtime/wlanreportd.rc"],
 }
