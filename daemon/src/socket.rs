@@ -42,6 +42,19 @@ impl Qrtr {
             node: 0,
             port: 0,
         };
+        // A new QRTR socket already knows its local node. qrtr_bind rejects
+        // any other node, including zero when the kernel's local node is one.
+        // Ask the kernel before requesting an ephemeral port; never infer the
+        // AP node from the modem node or a device-specific constant.
+        let mut len = mem::size_of::<Address>() as libc::socklen_t;
+        let rc = unsafe { libc::getsockname(raw, (&mut a as *mut Address).cast(), &mut len) };
+        if rc < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if len as usize != mem::size_of::<Address>() || a.family != AF_QIPCRTR as u16 {
+            return Err(io::Error::other("invalid QRTR local address"));
+        }
+        a.port = 0;
         let rc = unsafe {
             libc::bind(
                 raw,
@@ -52,7 +65,7 @@ impl Qrtr {
         if rc < 0 {
             return Err(io::Error::last_os_error());
         }
-        let mut len = mem::size_of::<Address>() as libc::socklen_t;
+        len = mem::size_of::<Address>() as libc::socklen_t;
         let rc = unsafe { libc::getsockname(raw, (&mut a as *mut Address).cast(), &mut len) };
         if rc < 0
             || len as usize != mem::size_of::<Address>()
