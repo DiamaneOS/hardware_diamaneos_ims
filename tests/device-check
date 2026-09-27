@@ -7,13 +7,18 @@ import shutil
 import subprocess
 import sys
 
-PACKAGES = ('org.diamaneos.imsbroker',
-            'org.codeaurora.ims', 'com.google.android.iwlan', 'com.android.telephony.qns')
+PACKAGES = ('org.diamaneos.imsbroker', 'org.codeaurora.ims', 'com.android.carrierconfig')
+IWLAN_PACKAGES = {
+    'qti': ('vendor.qti.iwlan', 'vendor.qti.hardware.cacert.server'),
+    'aosp': ('com.google.android.iwlan', 'com.android.telephony.qns'),
+}
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--serial', required=True, help='Explicit adb device serial; never auto-selects')
     parser.add_argument('--adb', default=shutil.which('adb'))
+    parser.add_argument('--iwlan', required=True, choices=IWLAN_PACKAGES,
+                        help='The implementation selected by this device product')
     args = parser.parse_args()
     if not args.adb: parser.error('adb not found; supply --adb')
     def shell(*command, missing_ok=False):
@@ -25,12 +30,13 @@ def main():
         return result.stdout.strip()
     enforcing = shell('getenforce') == 'Enforcing'
     packages = {}
-    for name in PACKAGES:
+    for name in PACKAGES + IWLAN_PACKAGES[args.iwlan]:
         output = shell('pm', 'path', name, missing_ok=True)
         packages[name] = any(line.startswith('package:') for line in output.splitlines())
     service = shell('service', 'list')
     available = 'vendor.diamaneos.hardware.imsdcm.IImsDcm/default' in service
-    report = {'evidence':'read-only-prerequisites', 'selinux_enforcing':enforcing,
+    report = {'evidence':'read-only-prerequisites', 'iwlan_implementation':args.iwlan,
+              'selinux_enforcing':enforcing,
               'adb_authentication_required':shell('getprop','ro.adb.secure') == '1',
               'ims_dcm_service_listed':available, 'service_listing_is_not_functional_validation':True, 'packages':packages,
               'carrier_registration_verified':False, 'emergency_delivery_verified':False}

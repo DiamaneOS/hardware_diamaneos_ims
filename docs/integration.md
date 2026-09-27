@@ -14,9 +14,11 @@ because its host tests pass.
 4. Build `imsdcmd`, `DiamaneOSImsBroker` and the policy with ordinary hardening and
    neverallow checks enabled. AIDL V1 is frozen and hash-checked locally; the
    platform build must still run its native API compatibility checks.
-5. Compare emergency carrier options and generate a candidate APN merge with
-   `integration/merge_emergency_apns.py`. It never installs or overwrites inputs.
-   Review duplicate precedence and any mixed-use row before adopting the output.
+5. Compare emergency carrier options and APNs. The FP6 candidate uses the
+   authenticated stock APN table intact, including IMS/EIMS and MVNO filters.
+   `integration/merge_emergency_apns.py` remains an optional comparison tool for
+   other integrations; review duplicate precedence and mixed-use rows before
+   adopting its output. It never installs or overwrites inputs.
 
 The deferred AML app and framework event patch live in
 [platform_packages_apps_EmergencyLocation](https://github.com/DiamaneOS/platform_packages_apps_EmergencyLocation).

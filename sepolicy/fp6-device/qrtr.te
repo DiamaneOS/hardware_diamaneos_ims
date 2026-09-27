@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The DiamaneOS Project
 #
-# DRAFT for the device tree: move to device/fairphone/FP6/sepolicy/fp6/ (a
+# Example for the device tree: review against its sepolicy/telephony/qrtr.te (a
 # BOARD_VENDOR_SEPOLICY_DIRS entry). It names that tree's domains, so it
 # belongs with them; nothing adds this directory to the build.
 #
@@ -9,12 +9,13 @@
 # NEW_SERVER from any local socket (net/qrtr/ns.c), and any socket can send
 # any QMI request to the modem. A domain that can open a QRTR socket can
 # therefore impersonate a modem-facing service or command the modem
-# (threat model, findings -24). Only the domains below may; the list is
-# every qipcrtr_socket grant in the FP6 policy at 49c0a9e plus the IMS DCM
-# daemon. Adding a domain means reviewing it against -24 first.
+# Only the domains below may. The device owns the active inventory; this file
+# is not included in the product. Adding a domain requires a new trust review.
 neverallow {
   domain
   -diamaneos_imsdcm
+  -fp6_iwlan_app
+  -hal_audio_default
   -hal_camera_default
   -hal_graphics_composer_default
   -hal_sensors_default
@@ -28,5 +29,5 @@ neverallow {
   -vendor_rfs_access
   -vendor_rmt_storage
   -vendor_thermal-engine
-  -vendor_time_daemon
+  userdebug_or_eng(`-su')
 } self:qipcrtr_socket create;
