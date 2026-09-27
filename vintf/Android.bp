@@ -21,3 +21,10 @@ prebuilt_etc {
     sub_dir: "init",
     vendor: true,
 }
+
+prebuilt_etc {
+    name: "imsdcmd-control.rc",
+    src: "imsdcmd-control.rc",
+    sub_dir: "init",
+    system_ext_specific: true,
+}
