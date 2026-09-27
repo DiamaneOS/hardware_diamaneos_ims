@@ -22,8 +22,9 @@ import org.xmlpull.v1.XmlPullParser;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -35,7 +36,7 @@ public final class EmergencyLocationApp extends Application {
     private Handler handler;
     private LocationManager locations;
     private TelephonyManager telephony;
-    private final List<AmlProfile> profiles = new ArrayList<>();
+    private AmlProfiles profiles = new AmlProfiles(List.of());
     private final List<Collection> active = new ArrayList<>();
     private final ThreadPoolExecutor delivery =
             new ThreadPoolExecutor(
@@ -78,51 +79,30 @@ public final class EmergencyLocationApp extends Application {
                     });
     }
 
-    private static String attr(XmlResourceParser x, String name, String fallback) {
-        String value = x.getAttributeValue(null, name);
-        return value == null ? fallback : value;
-    }
-
-    private static boolean flag(XmlResourceParser x, String name) {
-        String value = attr(x, name, "false");
-        if (!value.equals("true") && !value.equals("false"))
-            throw new IllegalArgumentException("invalid profile flag");
-        return value.equals("true");
-    }
-
     private void loadProfiles() {
+        List<AmlProfile> candidate = new ArrayList<>();
         try (XmlResourceParser x = getResources().getXml(R.xml.aml_profiles)) {
             while (x.next() != XmlPullParser.END_DOCUMENT) {
-                if (x.getEventType() != XmlPullParser.START_TAG || !x.getName().equals("profile"))
-                    continue;
-                if (profiles.size() >= 64) throw new IllegalArgumentException();
-                String packing = attr(x, "smsPacking", "gsm7-lsb");
-                if (!packing.equals("gsm7-lsb") && !packing.equals("gsm7-msb-legacy"))
-                    throw new IllegalArgumentException("unknown SMS packing");
-                AmlProfile p =
-                        new AmlProfile(
-                                x.getAttributeValue(null, "country"),
-                                new HashSet<>(Arrays.asList(attr(x, "numbers", "").split(","))),
-                                attr(x, "https", ""),
-                                attr(x, "sms", ""),
-                                x.getAttributeValue(null, "evidence"),
-                                Long.parseLong(attr(x, "expiresUtcMs", "0")),
-                                Long.parseLong(attr(x, "timeoutMs", "30000")),
-                                Long.parseLong(attr(x, "maxFixAgeMs", "10000")),
-                                Integer.parseInt(attr(x, "smsPort", "-1")),
-                                packing.equals("gsm7-msb-legacy"),
-                                new HashSet<>(Arrays.asList(attr(x, "sources", "CALL").split(","))),
-                                flag(x, "allowRoamingSms"),
-                                flag(x, "allowNoSimHttps"),
-                                flag(x, "allowMissingMetadata"),
-                                attr(x, "httpsImsi", "full"));
-                if (profiles.stream()
-                        .anyMatch(q -> p.overlaps(q) || p.wouldTrigger(q) || q.wouldTrigger(p)))
-                    throw new IllegalArgumentException("ambiguous AML routes");
-                profiles.add(p);
+                if (x.getEventType() != XmlPullParser.START_TAG) continue;
+                if (x.getDepth() == 1
+                        && x.getName().equals("aml-profiles")
+                        && x.getAttributeCount() == 0) continue;
+                if (x.getDepth() != 2
+                        || !x.getName().equals("profile")
+                        || candidate.size() >= AmlProfiles.MAX_PROFILES)
+                    throw new IllegalArgumentException("invalid profile structure");
+                Map<String, String> attrs = new HashMap<>();
+                for (int i = 0; i < x.getAttributeCount(); i++) {
+                    String namespace = x.getAttributeNamespace(i);
+                    if (namespace != null && !namespace.isEmpty())
+                        throw new IllegalArgumentException("unexpected attribute namespace");
+                    attrs.put(x.getAttributeName(i), x.getAttributeValue(i));
+                }
+                candidate.add(AmlProfiles.parse(attrs));
             }
+            profiles = new AmlProfiles(candidate);
         } catch (Exception e) {
-            profiles.clear();
+            profiles = new AmlProfiles(List.of());
             Log.e("EmergencyLocation", "Invalid AML route configuration");
         }
     }
@@ -147,14 +127,8 @@ public final class EmergencyLocationApp extends Application {
             // Slot-specific network country can be available even without a SIM.
             // Never use the locale, home SIM country or the other subscription.
             String country = telephony.getNetworkCountryIso(phoneId);
-            AmlProfile profile = null;
-            for (AmlProfile p : profiles) {
-                if (p.sources.contains(source)
-                        && p.matches(country, number, System.currentTimeMillis())) {
-                    profile = p;
-                    break;
-                }
-            }
+            AmlProfile profile =
+                    profiles.select(country, number, source, System.currentTimeMillis());
             if (profile == null || (!hasSim && !profile.allowNoSimHttps)) return;
             TelephonyManager tm = hasSim ? telephony.createForSubscriptionId(subId) : null;
             String home = tm == null ? "" : value(tm.getSimOperator());
@@ -175,7 +149,6 @@ public final class EmergencyLocationApp extends Application {
                             profile.allowMissingMetadata);
             if (!profile.acceptsIdentity(id, hasSim)) return;
             // Unknown home country is not evidence of domestic SMS routing.
-            boolean domestic = tm != null && country.equals(tm.getSimCountryIso());
             Collection c =
                     new Collection(
                             profile,
@@ -184,7 +157,8 @@ public final class EmergencyLocationApp extends Application {
                             phoneId,
                             source,
                             eventUtc,
-                            hasSim && id.complete() && (domestic || profile.allowRoamingSms));
+                            AmlProfiles.smsAllowed(
+                                    profile, id, hasSim, tm == null ? "" : tm.getSimCountryIso()));
             active.add(c);
             c.start();
         } catch (RuntimeException e) {
@@ -259,7 +233,7 @@ public final class EmergencyLocationApp extends Application {
 
         @Override
         public void onLocationChanged(Location l) {
-            if (closed || l.isMock() || !l.hasAccuracy()) return;
+            if (closed || !l.hasAccuracy()) return;
             try {
                 session.offer(
                         new AmlMessage.Fix(
@@ -269,7 +243,8 @@ public final class EmergencyLocationApp extends Application {
                                 l.getElapsedRealtimeNanos() / 1000000,
                                 l.getTime(),
                                 "gps"),
-                        SystemClock.elapsedRealtime());
+                        SystemClock.elapsedRealtime(),
+                        l.isMock());
             } catch (IllegalArgumentException ignored) {
             }
         }
@@ -294,18 +269,24 @@ public final class EmergencyLocationApp extends Application {
             AmlMessage.Fix fix = session.finish(now);
             long expires = now + DELIVERY_BUDGET_MS;
             // A stalled network cannot hold a wakelock or occupy both collection slots forever.
-            handler.postDelayed(this::cleanup, DELIVERY_BUDGET_MS);
+            Runnable job =
+                    () -> {
+                        try {
+                            deliver(this, fix, expires);
+                        } catch (RuntimeException e) {
+                            Log.w("EmergencyLocation", "Delivery unavailable");
+                        } finally {
+                            handler.post(this::cleanup);
+                        }
+                    };
+            handler.postDelayed(
+                    () -> {
+                        delivery.remove(job);
+                        cleanup();
+                    },
+                    DELIVERY_BUDGET_MS);
             try {
-                delivery.execute(
-                        () -> {
-                            try {
-                                deliver(this, fix, expires);
-                            } catch (RuntimeException e) {
-                                Log.w("EmergencyLocation", "Delivery unavailable");
-                            } finally {
-                                handler.post(this::cleanup);
-                            }
-                        });
+                delivery.execute(job);
             } catch (RejectedExecutionException e) {
                 cleanup();
                 Log.w("EmergencyLocation", "Location delivery capacity reached");
@@ -363,7 +344,8 @@ public final class EmergencyLocationApp extends Application {
                             c.source,
                             p.httpsImsi.equals("full"));
             try {
-                HttpsSender.Result result = new HttpsSender().send(p.https, body);
+                HttpsSender.Result result =
+                        new HttpsSender().send(p.https, body, () -> deliverable(c, expires));
                 Log.i("EmergencyLocation", "HTTPS transport result: " + result.name());
             } finally {
                 Arrays.fill(body, (byte) 0);
