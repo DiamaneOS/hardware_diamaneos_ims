@@ -21,11 +21,18 @@ use org_diamaneos_wlan::aidl::org::diamaneos::wlan::{
 use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::{Duration, Instant},
 };
 
 const SERVICE: &str = "org.diamaneos.wlan.IReporter/default";
+static STOP: AtomicBool = AtomicBool::new(false);
+extern "C" fn stop(_: libc::c_int) {
+    STOP.store(true, Ordering::Relaxed);
+}
 struct Shared {
     observations: Observations,
     uid: Option<u32>,
@@ -212,7 +219,22 @@ impl Client {
                     }
                 }
             } else if Some(peer) == self.endpoint {
+                let pending = self.state.pending_message();
                 self.state.receive(&bytes);
+                if let Some(message) = pending {
+                    if self.state.pending_message().is_none() {
+                        eprintln!(
+                            "wlanreportd: subscription {} message {} {}",
+                            self.subscription,
+                            message,
+                            if self.state.failed() {
+                                "rejected"
+                            } else {
+                                "acknowledged"
+                            }
+                        );
+                    }
+                }
             }
         }
         if let Some(peer) = self.endpoint {
@@ -265,7 +287,13 @@ fn run() -> io::Result<()> {
     let mut clients = (1..=slots)
         .map(|s| Client::new(s, node))
         .collect::<io::Result<Vec<_>>>()?;
-    loop {
+    // Handler only stores an atomic flag. Ordinary init stop gets a bounded
+    // withdrawal attempt; SIGKILL/modem failure cannot promise withdrawal.
+    unsafe {
+        libc::signal(libc::SIGTERM, stop as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGINT, stop as *const () as libc::sighandler_t);
+    }
+    while !STOP.load(Ordering::Relaxed) {
         let now = elapsed(origin);
         let observation = shared
             .lock()
@@ -280,6 +308,28 @@ fn run() -> io::Result<()> {
         }
         std::thread::sleep(Duration::from_millis(250));
     }
+    let current = shared
+        .lock()
+        .map_err(|_| io::Error::other("observer state"))?
+        .observations
+        .current(elapsed(origin));
+    if let Some(current) = current {
+        let withdrawn = Observation {
+            enabled: current.enabled,
+            network: None,
+        };
+        let deadline = elapsed(origin).saturating_add(2500);
+        while elapsed(origin) < deadline {
+            for client in &mut clients {
+                client.step(node, &withdrawn, elapsed(origin))?;
+            }
+            if clients.iter().all(|c| c.state.settled()) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    Ok(())
 }
 fn main() {
     if run().is_err() {
