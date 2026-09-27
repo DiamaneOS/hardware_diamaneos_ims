@@ -10,9 +10,9 @@
 #   can only take emergency away, never enable it.
 # persist.vendor.diamaneos.ims.dcm_kill: kill switch. 1 stops the daemon
 #   (imsdcmd.rc), so no DCM service is published to the modem at all.
-ro.vendor.diamaneos.ims.emergency_pdn             u:object_r:diamaneos_imsdcm_prop:s0 exact enum refuse serve
-persist.vendor.diamaneos.ims.emergency_pdn_kill   u:object_r:diamaneos_imsdcm_prop:s0 exact enum 0 1
-persist.vendor.diamaneos.ims.dcm_kill             u:object_r:diamaneos_imsdcm_prop:s0 exact enum 0 1
+ro.vendor.diamaneos.ims.emergency_pdn             u:object_r:vendor_diamaneos_imsdcm_prop:s0 exact enum refuse serve
+persist.vendor.diamaneos.ims.emergency_pdn_kill   u:object_r:vendor_diamaneos_imsdcm_prop:s0 exact enum 0 1
+persist.vendor.diamaneos.ims.dcm_kill             u:object_r:vendor_diamaneos_imsdcm_prop:s0 exact enum 0 1
 
-ro.vendor.diamaneos.ims.modem_node u:object_r:diamaneos_imsdcm_prop:s0 exact uint
-ro.vendor.diamaneos.ims.slots u:object_r:diamaneos_imsdcm_prop:s0 exact uint
+ro.vendor.diamaneos.ims.modem_node u:object_r:vendor_diamaneos_imsdcm_prop:s0 exact uint
+ro.vendor.diamaneos.ims.slots u:object_r:vendor_diamaneos_imsdcm_prop:s0 exact uint

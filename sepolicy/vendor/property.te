@@ -4,4 +4,4 @@
 # domain or app can read or set them. The daemon only reads them; vendor_init
 # sets the build defaults from /vendor/build.prop (vendor_init.te); on
 # userdebug builds root can change them for lab tests.
-vendor_internal_prop(diamaneos_imsdcm_prop)
+vendor_internal_prop(vendor_diamaneos_imsdcm_prop)

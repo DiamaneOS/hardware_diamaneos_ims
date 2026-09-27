@@ -24,7 +24,7 @@ binder_call(diamaneos_imsdcm, diamaneos_ims_broker_app)
 allow diamaneos_imsdcm self:qipcrtr_socket { create bind getattr getopt setopt read write };
 
 # Kill switches and the build-time emergency policy (property.te).
-get_prop(diamaneos_imsdcm, diamaneos_imsdcm_prop)
+get_prop(diamaneos_imsdcm, vendor_diamaneos_imsdcm_prop)
 # Refuse operation when its caller-isolation policy is not enforced.
 allow diamaneos_imsdcm selinuxfs:file r_file_perms;
 
