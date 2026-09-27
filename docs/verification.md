@@ -22,7 +22,8 @@ a carrier delivers location. Preserve that evidence distinction without requirin
 unplanned live emergency calls to run this suite.
 
 `tests/device-check` reads package/service presence, enforcing state and ADB-auth
-configuration for one explicit serial. Presence is a prerequisite, not functional
+configuration for one explicit serial and `--iwlan qti` or `--iwlan aosp`.
+Presence is a prerequisite, not functional
 acceptance. Native process recovery, permissions, actual modem/IMS interoperability,
 call audio, subscription switching, roaming and network loss need device evidence.
 

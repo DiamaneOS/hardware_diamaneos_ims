@@ -8,5 +8,6 @@
     "path": "packages/services/QualifiedNetworksService",
     "revision": "f1500926b882a189c7c5772368835d5de700b34f"
   },
-  "status": "source integration candidate; native permissions, policy, modem/carrier qualification pending"
+  "selected_for_fp6": false,
+  "status": "Alternative AP-assisted source integration; the FP6 candidate selects its stock QTI modem-backed frontend. Native and carrier qualification remain pending."
 }

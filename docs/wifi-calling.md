@@ -7,13 +7,20 @@ network: `DataNetwork` exposes IMS/EIMS as `TRANSPORT_CELLULAR` even when its
 underlying access is IWLAN. Do not replace that request with a plain Wi-Fi Internet
 network or return a home-router address as the IMS PDN address.
 
-Use the [DiamaneOS IWLAN fork](https://github.com/DiamaneOS/platform_packages_services_Iwlan)
+The FP6 integration candidate uses the stock Qualcomm IWLAN frontend and its
+certificate helper with the QCRIL `IIWlan` service. They share an application UID,
+not the system UID; the device policy confines their Binder and QRTR access.
+Required JNI libraries and carrier data are pinned in the vendor selection.
+No CNE or second DCM publisher is selected.
+
+The alternative [DiamaneOS IWLAN fork](https://github.com/DiamaneOS/platform_packages_services_Iwlan)
 at `packages/services/Iwlan`, paired with AOSP `QualifiedNetworksService` and the
 platform IKE/IPsec modules. Its `diamaneos/product.mk` and `diamaneos/board.mk`
-provide opt-in source package, framework binding and domain selection. The app has
+provide opt-in source package, framework binding and domain selection. It is not
+selected for the FP6 candidate. The app has
 its own UID; it retains platform signing for the declared IPsec permission.
 
-This prepares an integration candidate, not proven FP6 interoperability. Confirm
+Neither path has proven FP6 carrier interoperability yet. Confirm
 modem AP-assisted support, required vendor interfaces, selected carrier overrides,
 provisioning, ePDG identity validation, accepted cipher suites, IMS registration,
 voice/SMS, suspend and WWAN/IWLAN handovers. Keep normal and emergency behavior
