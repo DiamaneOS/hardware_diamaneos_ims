@@ -19,12 +19,6 @@ service vendor.imsdcmd /vendor/bin/imsdcmd
     disabled
     restart_period 1
 
-# Start after persistent properties are loaded (before the first unlock on
-# FBE), so a set kill switch is seen before the DCM service is ever published.
-# The build sets persist.vendor.diamaneos.ims.dcm_kill=0 as the default; an
-# absent value leaves the daemon stopped.
-on property:ro.persistent_properties.ready=true && property:persist.vendor.diamaneos.ims.dcm_kill=0
-    start vendor.imsdcmd
-
-on property:persist.vendor.diamaneos.ims.dcm_kill=1
-    stop vendor.imsdcmd
+# Startup and kill-switch actions live in imsdcmd-control.rc on system_ext.
+# The persistent-properties-ready gate is platform-private and cannot be a
+# vendor init trigger. Keep this service non-lazy so lookup cannot bypass it.
