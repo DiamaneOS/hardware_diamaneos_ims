@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+"""Build the standalone permission-free lab APK locally. Never installs it."""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import runpy
+import subprocess
+import tempfile
+import zipfile
+import xml.etree.ElementTree as ET
+
+HERE = Path(__file__).resolve().parent
+COMMON = runpy.run_path(str(HERE / 'run'))
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--sdk', type=Path, default=os.environ.get('ANDROID_SDK_ROOT', os.environ.get('ANDROID_HOME')))
+    parser.add_argument('--build-tools', default='36.0.0')
+    parser.add_argument('--platform', default='android-36')
+    args = parser.parse_args()
+    if not args.sdk: parser.error('set ANDROID_SDK_ROOT or supply --sdk')
+    sdk = Path(args.sdk)
+    bt = sdk / 'build-tools' / args.build_tools
+    android = sdk / 'platforms' / args.platform / 'android.jar'
+    for p in [android, bt/'aapt2', bt/'d8', bt/'zipalign', bt/'apksigner']:
+        if not p.is_file(): parser.error('missing SDK component: ' + str(p))
+    manifest = HERE/'android/AndroidManifest.xml'
+    root = ET.parse(manifest).getroot()
+    if root.attrib['package'] != 'org.diamaneos.emergencylocation.lab':
+        raise ValueError('unexpected lab package')
+    for tag in ('uses-permission', 'instrumentation', 'receiver', 'service', 'provider'):
+        if any(root.iter(tag)):
+            raise ValueError('lab manifest contains a forbidden component: ' + tag)
+    output = HERE/'out/apk'; output.mkdir(parents=True, exist_ok=True)
+    temporary = tempfile.TemporaryDirectory(prefix='compile-', dir=output)
+    scratch = Path(temporary.name)
+    classes = scratch/'classes'; classes.mkdir()
+    sources = [COMMON['CORE']/(name+'.java') for name in COMMON['NAMES']]
+    sources += sorted((HERE/'src').rglob('*.java')) + sorted((HERE/'android').rglob('*.java'))
+    def run(command): subprocess.run(list(map(str,command)),check=True)
+    run([COMMON['java_tool']('javac'),'--release','17','-Xlint:all,-deprecation','-classpath',android,'-d',classes,*sources])
+    jar = output/'lab-classes.jar'
+    # Archive only this invocation's classes after verifying the APK sources remain permission-free.
+    with zipfile.ZipFile(jar,'w',zipfile.ZIP_DEFLATED) as archive:
+        for p in sorted(classes.rglob('*.class')): archive.write(p,p.relative_to(classes))
+    dex = scratch/'dex'; dex.mkdir()
+    run([bt/'d8','--lib',android,'--min-api','35','--output',dex,jar])
+    resource = output/'resources.apk'
+    run([bt/'aapt2','link','-o',resource,'-I',android,'--manifest',manifest,'-A',HERE/'scenarios'])
+    unsigned = output/'unsigned.apk'
+    with zipfile.ZipFile(resource) as source, zipfile.ZipFile(unsigned,'w',zipfile.ZIP_DEFLATED) as target:
+        for info in source.infolist(): target.writestr(info,source.read(info.filename))
+        for p in sorted(dex.glob('classes*.dex')): target.write(p,p.name)
+    aligned = output/'aligned.apk'
+    run([bt/'zipalign','-f','4',unsigned,aligned])
+    key = output/'lab-test.jks'
+    if not key.exists():
+        run([COMMON['java_tool']('keytool'),'-genkeypair','-keystore',key,'-storepass','android',
+             '-keypass','android','-alias','lab','-keyalg','RSA','-keysize','3072','-validity','3650',
+             '-dname','CN=DiamaneOS disposable lab key','-noprompt'])
+        key.chmod(0o600)
+    apk = output/'diamaneos-aml-lab.apk'
+    run([bt/'apksigner','sign','--ks',key,'--ks-key-alias','lab','--ks-pass','pass:android',
+         '--key-pass','pass:android','--out',apk,aligned])
+    run([bt/'apksigner','verify',apk])
+    manifest_dump = subprocess.check_output([str(bt/'aapt2'),'dump','permissions',str(apk)],text=True)
+    if 'uses-permission' in manifest_dump: raise ValueError('unexpected permission in built APK')
+    digest = hashlib.sha256(apk.read_bytes()).hexdigest()
+    metadata = {'artifact':apk.name,'sha256':digest,'bytes':apk.stat().st_size,
+                'package':'org.diamaneos.emergencylocation.lab','permissions':[],
+                'min_sdk':35,'device_execution_verified':False,'production_signing':False,
+                'source_sha256':{str(p.relative_to(HERE.parent)):hashlib.sha256(p.read_bytes()).hexdigest()
+                                 for p in sources+[manifest]+sorted((HERE/'scenarios').glob('*.properties'))}}
+    (output/'artifact.json').write_text(json.dumps(metadata,indent=2)+'\n')
+    temporary.cleanup()
+    print(json.dumps(metadata,indent=2))
+
+if __name__ == '__main__': main()
