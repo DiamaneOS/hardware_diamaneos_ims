@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+"""Exercise the actual HTTPS sender against a local TLS receiver, never emergency infrastructure."""
+import http.server
+import json
+from pathlib import Path
+import runpy
+import ssl
+import subprocess
+import tempfile
+import threading
+
+HERE = Path(__file__).resolve().parent
+COMMON = runpy.run_path(str(HERE/'run'))
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *args): pass
+    def do_POST(self):
+        length = int(self.headers.get('Content-Length', '0'))
+        if length < 1 or length > 2048:
+            self.send_error(400); return
+        self.server.payloads.append(self.rfile.read(length))
+        self.send_response(self.server.status)
+        if self.server.status == 307: self.send_header('Location', 'https://receiver.invalid/never-follow')
+        self.send_header('Content-Length','0'); self.end_headers()
+
+def require(condition, message):
+    if not condition:
+        raise AssertionError(message)
+
+def main():
+    classes = COMMON['compile_host']()
+    with tempfile.TemporaryDirectory(prefix='diamaneos-lab-tls-') as directory:
+        temp = Path(directory)
+        key, cert, trust = temp/'key.pem', temp/'cert.pem', temp/'trust.p12'
+        subprocess.run(['openssl','req','-x509','-newkey','rsa:2048','-nodes','-days','1',
+                        '-keyout',str(key),'-out',str(cert),'-subj','/CN=DiamaneOS loopback lab',
+                        '-addext','subjectAltName=IP:127.0.0.1'],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+        key.chmod(0o600)
+        subprocess.run([COMMON['java_tool']('keytool'),'-importcert','-noprompt','-alias','lab',
+                        '-file',str(cert),'-keystore',str(trust),'-storepass','lab-only-password'],
+                       check=True,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+        server = http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
+        server.daemon_threads = True; server.status = 200; server.payloads = []
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(cert,key)
+        server.socket = context.wrap_socket(server.socket,server_side=True)
+        thread = threading.Thread(target=server.serve_forever,daemon=True); thread.start()
+        endpoint = f'https://127.0.0.1:{server.server_port}/aml'
+        def probe(trusted):
+            command=[COMMON['java_tool']('java')]
+            if trusted: command += [f'-Djavax.net.ssl.trustStore={trust}','-Djavax.net.ssl.trustStorePassword=lab-only-password']
+            command += ['-cp',str(classes),'org.diamaneos.emergencylocation.TlsProbe',endpoint]
+            return subprocess.check_output(command,text=True,timeout=20).strip()
+        try:
+            require(probe(False) == 'FAILED' and len(server.payloads) == 0, 'untrusted certificate accepted')
+            require(probe(True) == 'ACCEPTED' and len(server.payloads) == 1, 'trusted delivery failed')
+            server.status = 307
+            require(probe(True) == 'REJECTED' and len(server.payloads) == 2, 'redirect followed')
+            server.status = 503
+            require(probe(True) == 'REJECTED' and len(server.payloads) == 3, 'HTTP error accepted')
+            require(all(p == b'v=1&source=CALL&test=synthetic' for p in server.payloads), 'payload changed')
+            print(json.dumps({'passed':4,'evidence':'loopback-TLS-only','real_world_validated':False}))
+        finally:
+            server.shutdown(); server.server_close(); thread.join(timeout=5)
+
+if __name__=='__main__': main()
