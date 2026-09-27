@@ -1,0 +1,114 @@
+// SPDX-License-Identifier: Apache-2.0
+use diamaneos_wlan_reporting::{
+    session::{Observation, Session},
+    Connected,
+};
+fn connected() -> Observation {
+    Observation {
+        enabled: true,
+        network: Some(
+            Connected::new(
+                [2, 0, 0, 0, 0, 1],
+                Some("192.0.2.1".parse().unwrap()),
+                None,
+                true,
+            )
+            .unwrap(),
+        ),
+    }
+}
+fn ack(request: &[u8]) -> [u8; 14] {
+    [
+        2, request[1], request[2], request[3], request[4], 7, 0, 2, 4, 0, 0, 0, 0, 0,
+    ]
+}
+fn ready(s: &mut Session) {
+    for id in [0x27, 0x20, 0x34, 0x20] {
+        let p = s.poll(0).unwrap();
+        assert_eq!(p[3], id);
+        s.receive(&ack(&p));
+    }
+    assert!(s.poll(0).is_none());
+}
+#[test]
+fn bind_clear_and_ack_before_announcing_available() {
+    assert!(Session::new(0).is_none());
+    assert!(Session::new(3).is_none());
+    let mut a = Session::new(1).unwrap();
+    let mut b = Session::new(2).unwrap();
+    a.observe(connected());
+    b.observe(connected());
+    let pa = a.poll(0).unwrap();
+    let pb = b.poll(0).unwrap();
+    assert_eq!(&pa[10..14], &1_u32.to_le_bytes());
+    assert_eq!(&pb[10..14], &2_u32.to_le_bytes());
+    a.receive(&ack(&pa));
+    b.receive(&ack(&pb));
+    let clear = a.poll(0).unwrap();
+    assert_eq!(&clear[clear.len() - 4..], &[0, 0, 0, 0]);
+    assert!(a.poll(1).is_none());
+    a.receive(&ack(&clear));
+    for id in [0x34, 0x20] {
+        let p = a.poll(2).unwrap();
+        assert_eq!(p[3], id);
+        a.receive(&ack(&p));
+    }
+    assert!(a.poll(3).is_none());
+    // The second subscription cannot inherit the first client's acknowledgements.
+    assert_eq!(b.poll(0).unwrap()[3], 0x20);
+}
+#[test]
+fn disconnect_during_pending_up_does_not_retry_stale_up() {
+    let mut s = Session::new(1).unwrap();
+    s.observe(connected());
+    for _ in 0..3 {
+        let p = s.poll(0).unwrap();
+        s.receive(&ack(&p));
+    }
+    let up = s.poll(0).unwrap();
+    s.observe(Observation {
+        enabled: true,
+        network: None,
+    });
+    let replacement = s.poll(2000).unwrap();
+    assert_eq!(replacement[3], 0x34);
+    assert_ne!(&replacement[1..3], &up[1..3]);
+    s.receive(&ack(&up));
+    assert!(s.poll(2001).is_none());
+    s.receive(&ack(&replacement));
+    let down = s.poll(2002).unwrap();
+    assert_eq!(down[3], 0x20);
+    assert_eq!(&down[down.len() - 4..], &[0, 0, 0, 0]);
+}
+#[test]
+fn bounded_retries_and_negative_ack_fail_explicitly() {
+    let mut s = Session::new(1).unwrap();
+    let first = s.poll(0).unwrap();
+    let mut unrelated = ack(&first);
+    unrelated[1] = 99;
+    s.receive(&unrelated);
+    assert_eq!(s.poll(2000).unwrap(), first);
+    assert_eq!(s.poll(4000).unwrap(), first);
+    assert!(s.poll(6000).is_none());
+    assert!(s.failed());
+    assert!(s.poll(u64::MAX).is_none());
+    let mut s = Session::new(1).unwrap();
+    let p = s.poll(0).unwrap();
+    let mut no = ack(&p);
+    no[10] = 1;
+    no[12] = 5;
+    s.receive(&no);
+    assert!(s.failed());
+}
+#[test]
+fn new_modem_session_rebinds_and_clears_before_replaying() {
+    let mut old = Session::new(1).unwrap();
+    old.observe(connected());
+    ready(&mut old);
+    let mut restarted = Session::new(1).unwrap();
+    restarted.observe(connected());
+    let bind = restarted.poll(0).unwrap();
+    assert_eq!(bind[3], 0x27);
+    restarted.receive(&ack(&bind));
+    assert_eq!(restarted.poll(1).unwrap()[3], 0x20);
+}
