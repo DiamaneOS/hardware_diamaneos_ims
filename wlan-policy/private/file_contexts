@@ -1,0 +1,2 @@
+# SPDX-License-Identifier: Apache-2.0
+/system_ext/bin/wlanreportd u:object_r:diamaneos_wlan_reporter_exec:s0

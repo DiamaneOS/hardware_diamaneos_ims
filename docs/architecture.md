@@ -5,7 +5,7 @@ There are two independently privileged processes in this repository:
 | Component | Privilege | Excluded capabilities |
 | --- | --- | --- |
 | IMS DCM daemon | Vendor UID 2990; QRTR to the configured modem; own Binder service | Internet, SMS, location, arbitrary Binder peers, file writes, capabilities |
-| IMS broker | `CONNECTIVITY_USE_RESTRICTED_NETWORKS` | Internet traffic, modem sockets, location, SMS |
+| IMS broker | `CONNECTIVITY_USE_RESTRICTED_NETWORKS`, revocable Network permission for policy accounting | Direct IP/modem sockets, location, SMS |
 
 The daemon owns all protocol state on one thread. Binder callbacks enqueue bounded
 messages. Session IDs are bounded to 20–98, with capacity reserved for emergency
@@ -25,6 +25,12 @@ notifications and queued old callbacks cannot affect its successor. Network
 replacement waits for matching capabilities and link properties before reporting. A blocked network is not advertised as usable.
 Tentative, failed-DAD, deprecated, link-local, multicast and unspecified addresses
 are not advertised.
+
+The Network permission does not by itself grant direct socket access through
+SELinux. These socket restrictions do not prove that every indirect network path
+through permitted Android IPC is impossible; audit both permission and Binder
+boundaries. The proposed [Wi-Fi observer/reporter](wlan-reporting-design.md) must
+use separate identities rather than widening this broker's authority.
 
 ## Scope and remaining verification
 

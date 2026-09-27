@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+android_app {
+    name: "DiamaneOSWlanObserver",
+    srcs: ["src/**/*.java"],
+    platform_apis: true,
+    static_libs: ["org.diamaneos.wlan-java"],
+    certificate: "platform",
+    system_ext_specific: true,
+    privileged: true,
+    required: ["sysconfig-org.diamaneos.wlanobserver.xml"],
+}
+prebuilt_etc {
+    name: "sysconfig-org.diamaneos.wlanobserver.xml",
+    src: "sysconfig.xml",
+    filename: "sysconfig-org.diamaneos.wlanobserver.xml",
+    sub_dir: "sysconfig", system_ext_specific: true,
+}
