@@ -36,3 +36,9 @@ Still required:
 
 Passing these host tests never changes those rows to PASS. The implementation
 must not be presented as working emergency calling or German AML on that basis.
+
+The [lab](../lab/README.md) adds configurable synthetic scenarios, a multi-country
+catalogue test, real host TLS on loopback, a standalone zero-permission APK and a
+read-only device prerequisite inventory. Lab reports label their evidence scope;
+no production receiver or native radio result is inferred. The production loader
+and harness share catalogue validation, selection and SMS eligibility logic.

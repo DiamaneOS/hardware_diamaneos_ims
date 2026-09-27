@@ -44,3 +44,10 @@ place a call, publish a QRTR service, send SMS, or contact an AML endpoint.
 
 See [architecture](docs/architecture.md), [protocol](docs/dcm-protocol.md),
 [Android integration](docs/integration.md), and [AML receiver configuration](docs/aml-profile.md).
+
+## Test harness
+
+The [emergency connectivity lab](lab/README.md) runs configurable country scenarios
+using production AML logic, validates receiver profiles, exercises HTTPS on
+loopback, and builds a separate permission-free Android lab APK. Neither the lab
+nor passing scenarios establishes carrier or emergency-centre coverage.

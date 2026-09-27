@@ -74,3 +74,12 @@ Pending deliveries expire, and wakelocks end even on transport stalls. HTTPS use
 connect/read timeouts; the platform DNS resolver does not provide a hard Java
 thread deadline. Native stall tests remain required, and transport receipt is
 never reported as emergency-centre delivery.
+
+Validate regional configuration with `./lab/run validate-profiles <file.xml>`.
+The host validator and Android loader share field parsing and catalogue rules.
+The catalogue supports up to 1,024 profiles and indexes them by country. Unknown
+attributes, duplicate list entries and ambiguous or recursive routes fail closed.
+Validation cannot authenticate receiver data or turn empty profiles into coverage.
+Queued deliveries expire and are removed; a late HTTPS connection is checked again
+before writing location data. Resolver/thread cancellation still needs native
+qualification; connect/read timeouts are not an absolute thread deadline.
