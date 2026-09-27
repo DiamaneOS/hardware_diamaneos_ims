@@ -76,6 +76,15 @@ impl Session {
         self.step == Step::Failed
     }
 
+    /// Message identity only, never identifiers or encoded payloads.
+    pub fn pending_message(&self) -> Option<u16> {
+        self.pending.as_ref().map(|p| p.message)
+    }
+
+    pub fn settled(&self) -> bool {
+        self.step == Step::Idle && self.confirmed.as_ref() == Some(&self.desired)
+    }
+
     /// Retries preserve transaction and payload. Exhaustion requires a fresh
     /// QRTR endpoint; this instance never wraps and reuses a transaction ID.
     pub fn poll(&mut self, now_ms: u64) -> Option<Vec<u8>> {
