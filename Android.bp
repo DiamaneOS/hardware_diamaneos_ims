@@ -23,7 +23,7 @@ rust_binary {
         "libdiamaneos_ims_dcm", "libdiamaneos_ims_runtime",
         "vendor.diamaneos.hardware.imsdcm-V1-rust"],
     vintf_fragment_modules: ["vendor.diamaneos.hardware.imsdcm.xml"],
-    required: ["imsdcmd.rc"],
+    required: ["imsdcmd.rc", "imsdcmd-control.rc"],
 }
 rust_test_host {
     name: "DiamaneOSImsDcmHostTests", srcs: ["dcm/tests/simulation.rs"], edition: "2021",
