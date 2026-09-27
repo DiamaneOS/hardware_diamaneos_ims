@@ -8,7 +8,7 @@
 
      - One privileged permission, CONNECTIVITY_USE_RESTRICTED_NETWORKS, which
        ConnectivityService requires for the restricted IMS and EIMS requests.
-       The normal INTERNET permission lets NetworkPolicyManager track this
+       INTERNET (the revocable Network permission on our base) lets Android track this
        persistent UID in its background firewall. Without it, Android 17
        reports connected IMS bearers as blocked for the broker. SELinux
        still forbids IP/raw/modem sockets; the broker sends no network traffic.
