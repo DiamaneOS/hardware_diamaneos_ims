@@ -21,6 +21,17 @@ failures; it cannot confirm that a real emergency call reaches a responder or th
 a carrier delivers location. Preserve that evidence distinction without requiring
 unplanned live emergency calls to run this suite.
 
+After a platform build is authorized, `sh tests/run-platform-tests.sh emulator-SERIAL`
+selects the existing Android mock suites for emergency state/number handling,
+dual-SIM data selection, IMS call tracking, TeleService routing, GNSS callbacks,
+carrier configuration and entitlement. Run it in the candidate source environment
+against an isolated Android emulator using compatible platform/test keys. It
+refuses physical-device serials and may build through `atest`. These Android
+tests have not been run as part of the host-only checks. GNSS callback tests do
+not simulate the closed modem's SUPL/LPP implementation or confirm location
+delivery. Inspect test skips and installed target versions; a generic emulator
+without the FP6 carrier assets cannot qualify their packaging.
+
 `tests/device-check` reads package/service presence, enforcing state and ADB-auth
 configuration for one explicit serial and `--iwlan qti` or `--iwlan aosp`.
 Presence is a prerequisite, not functional
