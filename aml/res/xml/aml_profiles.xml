@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: Apache-2.0 -->
-<!-- No production destination may be guessed. Populate only from an operator's
-     documented integration agreement, including HTTPS partial-IMSI acceptance,
-     text-SMS format acceptance, expiry, timing and roaming rules. -->
+<!-- Populate from verified regional receiver configuration: destinations,
+     transport/encoding, identifiers, expiry, timing and roaming rules.
+     A schema-valid file alone does not establish receiver interoperability. -->
 <aml-profiles />
