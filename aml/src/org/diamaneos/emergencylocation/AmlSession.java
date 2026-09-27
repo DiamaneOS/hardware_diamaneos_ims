@@ -23,7 +23,12 @@ final class AmlSession {
     }
 
     boolean offer(AmlMessage.Fix f, long now) {
-        if (finished
+        return offer(f, now, false);
+    }
+
+    boolean offer(AmlMessage.Fix f, long now, boolean mock) {
+        if (mock
+                || finished
                 || now < start
                 || now > deadline
                 || f == null

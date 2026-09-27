@@ -12,13 +12,16 @@ mkdir -p tests/out/aml tests/out/broker-core
     aml/src/org/diamaneos/emergencylocation/AmlMessage.java \
     aml/src/org/diamaneos/emergencylocation/AmlSession.java \
     aml/src/org/diamaneos/emergencylocation/AmlProfile.java \
+    aml/src/org/diamaneos/emergencylocation/AmlProfiles.java \
     aml/src/org/diamaneos/emergencylocation/HttpsSender.java \
     aml/src/org/diamaneos/emergencylocation/TrustedEvent.java \
     aml/src/org/diamaneos/emergencylocation/SmsPayload.java \
     aml/tests/org/diamaneos/emergencylocation/SimulationTest.java \
-    aml/tests/org/diamaneos/emergencylocation/TransportTest.java
+    aml/tests/org/diamaneos/emergencylocation/TransportTest.java \
+    aml/tests/org/diamaneos/emergencylocation/CatalogTest.java
 "$JAVA" -cp tests/out/aml org.diamaneos.emergencylocation.SimulationTest
 "$JAVA" -cp tests/out/aml org.diamaneos.emergencylocation.TransportTest
+"$JAVA" -cp tests/out/aml org.diamaneos.emergencylocation.CatalogTest
 "$JAVAC" -Xlint:all -Werror -d tests/out/broker-core \
     broker/src/org/diamaneos/imsbroker/NetworkState.java \
     tests/java/org/diamaneos/imsbroker/NetworkStateTest.java

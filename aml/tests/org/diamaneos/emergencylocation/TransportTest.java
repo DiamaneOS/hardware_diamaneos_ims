@@ -79,8 +79,16 @@ final class TransportTest {
                                 })
                         .send(uri, new byte[1])
                 != HttpsSender.Result.FAILED) throw new AssertionError();
+        Fake blocked = new Fake(200);
+        HttpsSender guarded = new HttpsSender(u -> blocked);
+        if (guarded.send(uri, new byte[] {1}, () -> false) != HttpsSender.Result.FAILED
+                || blocked.data.size() != 0) throw new AssertionError();
+        final int[] checks = {0};
+        if (guarded.send(uri, new byte[] {1}, () -> ++checks[0] == 1) != HttpsSender.Result.FAILED
+                || blocked.data.size() != 0
+                || !blocked.disconnected) throw new AssertionError();
         System.out.println(
-                "AML transport: 9 simulated outcomes passed, including TLS failure and redirects;"
+                "AML transport: 11 simulated outcomes passed, including TLS failure and redirects;"
                         + " no network used");
     }
 }

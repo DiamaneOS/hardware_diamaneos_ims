@@ -6,6 +6,7 @@ package org.diamaneos.emergencylocation;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
+import java.util.function.BooleanSupplier;
 
 import javax.net.ssl.HttpsURLConnection;
 
@@ -32,12 +33,17 @@ final class HttpsSender {
     }
 
     Result send(URI endpoint, byte[] body) {
+        return send(endpoint, body, () -> true);
+    }
+
+    Result send(URI endpoint, byte[] body, BooleanSupplier permitted) {
         if (endpoint == null
                 || !"https".equals(endpoint.getScheme())
                 || body == null
                 || body.length > 2048) throw new IllegalArgumentException("invalid HTTPS request");
         HttpsURLConnection c = null;
         try {
+            if (!permitted.getAsBoolean()) return Result.FAILED;
             c = connections.open(endpoint);
             c.setInstanceFollowRedirects(false);
             c.setConnectTimeout(5000);
@@ -49,6 +55,9 @@ final class HttpsSender {
             c.setFixedLengthStreamingMode(body.length);
             // Platform TLS validation/hostname checking stays installed unchanged.
             try (OutputStream out = c.getOutputStream()) {
+                // DNS/TLS can outlast collection. Do not write a stale payload
+                // when connection setup returns after its delivery window.
+                if (!permitted.getAsBoolean()) return Result.FAILED;
                 out.write(body);
             }
             int code = c.getResponseCode();
