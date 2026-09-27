@@ -1,12 +1,11 @@
 # Architecture and security boundaries
 
-There are three independently privileged processes:
+There are two independently privileged processes in this repository:
 
 | Component | Privilege | Excluded capabilities |
 | --- | --- | --- |
 | IMS DCM daemon | Vendor UID 2990; QRTR to the configured modem; own Binder service | Internet, SMS, location, arbitrary Binder peers, file writes, capabilities |
 | IMS broker | `CONNECTIVITY_USE_RESTRICTED_NETWORKS` | Internet traffic, modem sockets, location, SMS |
-| Emergency location | A trusted call event, limited location collection, device/country metadata, SMS/HTTPS delivery | QRTR, IMS Binder service, placing/cancelling/routing calls |
 
 The daemon owns all protocol state on one thread. Binder callbacks enqueue bounded
 messages. Session IDs are bounded to 20–98, with capacity reserved for emergency
@@ -27,27 +26,17 @@ replacement waits for matching capabilities and link properties before reporting
 Tentative, failed-DAD, deprecated, link-local, multicast and unspecified addresses
 are not advertised.
 
-AML runs independently. The platform bridge dispatches asynchronously after the
-existing emergency notification path; voice never waits for it. The receiver
-checks system-server sender identity. Its read-only profile selects destinations;
-an incoming event cannot choose a URL, SMS recipient or location. Location bypass
-is request-scoped and time-bounded; it does not change the global location switch.
-Coordinates, identifiers, APNs and packet contents are absent from logs. HTTPS
-keeps platform TLS verification and refuses redirects. Data SMS avoids ordinary
-text-message persistence; receiver-specific packing and port must be verified.
+## Scope and remaining verification
 
-## Remaining qualification
+The existing Android IMS service, modem firmware and carrier stack retain call
+routing, voice/SMS and carrier emergency-location responsibilities. This component
+supplies normal/emergency data connections; it is not an AML delivery service.
 
-The current AML collector uses GNSS, not Google's fused Wi-Fi/cell positioning.
-Outgoing emergency calls and SMS have distinct protected activation events.
-No-SIM HTTPS and missing metadata are supported only when explicitly accepted by
-the read-only receiver profile; unknown fields are omitted, never fabricated.
-The framework supplies the actual phone index, so no default SIM is guessed.
-SMS requires complete metadata and the same active subscription; roaming SMS is
-off unless its routing is explicitly verified. Recursive SMS destinations are
-rejected. HTTPS uses the standard full IMSI unless a receiver explicitly accepts
-the reduced form. Identity is read only for a matching profile and retained in
-memory for the bounded operation. A 2xx response is transport receipt, not proof that
-a call taker received or matched the location. SMS submission has no delivery
-claim. Full framework/Soong builds, enforcing policy, seccomp execution, carrier
-registration and physical call/audio/radio fallback remain unqualified.
+The deferred AML app and its framework event patch are maintained separately in
+[platform_packages_apps_EmergencyLocation](https://github.com/DiamaneOS/platform_packages_apps_EmergencyLocation).
+Neither the daemon nor broker requires that repository or its permissions.
+
+Full Soong/link, enforcing policy, native syscall-filter execution and modem/carrier
+behavior remain unqualified by host tests. Simulated emergency scenarios verify
+only the implemented state/protocol boundaries, not real network fallback or
+responder location receipt.

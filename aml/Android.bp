@@ -1,9 +1,0 @@
-// SPDX-License-Identifier: Apache-2.0
-android_app {
-    name: "DiamaneOSEmergencyLocation",
-    srcs: ["src/**/*.java"], resource_dirs: ["res"],
-    sdk_version: "system_current", privileged: true, system_ext_specific: true,
-    required: ["privapp-permissions-org.diamaneos.emergencylocation.xml",
-        "default-permissions-emergency-location.xml", "sysconfig-emergency-location.xml"],
-    // No default product selection until endpoint/permission/policy qualification.
-}

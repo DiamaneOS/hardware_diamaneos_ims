@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import sys
 
-PACKAGES = ('org.diamaneos.imsbroker', 'org.diamaneos.emergencylocation',
+PACKAGES = ('org.diamaneos.imsbroker',
             'org.codeaurora.ims', 'com.google.android.iwlan', 'com.android.telephony.qns')
 
 def main():

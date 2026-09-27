@@ -1,44 +1,31 @@
 # Verification and limits
 
 `tests/run-host-tests.sh` exercises the production Rust codec/state machine,
-Java network-callback state, AML encoder/session/authorization/transport logic,
-and emergency-APN merger. It uses no phone, QRTR publication, SMS or external
-network. In-memory HTTPS responses include rejection, redirects and TLS/I/O
-failure. Synthetic IP addresses are from documentation ranges and the fake
-receiver is under `.invalid`.
+Java network-callback state and emergency-APN merger. It uses no phone, QRTR
+publication, SMS or external network. Addresses are synthetic documentation values.
 
-Covered scenarios include dual SIM, shared IPv4/IPv6 requests, delayed and stale
-callbacks, modem reset, broker loss, normal-session exhaustion with emergency
-capacity left, invalid peer, missing IP family, malformed frames, duplicate TLVs,
-instance destruction, timezone encoding, competing QRTR publishers, blocked networks,
-network replacement and thousands of arbitrary packets.
-AML tests cover freshness/deadlines, cancellation, unavailable location,
-coordinate/identifier bounds, locale-independent formatting, message lengths,
-GSM packing, country/number/expiry matching, sender identity and transport error
-handling. The APN test preserves existing input and checks idempotence.
+Covered scenarios include separate SIMs, shared IPv4/IPv6 requests, delayed and
+stale callbacks, modem reset, broker loss, normal-session exhaustion with emergency
+capacity retained, invalid peers, missing IP families, malformed frames, duplicate
+TLVs, instance destruction, timezone encoding, competing publishers, blocked
+networks and network replacement. The APN tests preserve the supplied input and
+check idempotence. These tests are independent of the deferred AML repository.
 
-Additional checks run during development: Java compilation against Android 17
-SDK modules and generated AIDL, resource linking, API dump equality, Linux host
-Rust tests, and Android arm64 Rust metadata compilation against the platform's
-actual Binder libraries. These are not full Soong/linker or SELinux passes.
+Additional development checks include Java compilation against Android 17 SDK
+modules, AIDL dump comparison, Linux host tests and arm64 Rust metadata compilation.
+They are not full Soong/linker, SELinux or native syscall-filter verification.
 
-Still required:
+The current verification plan separates ordinary peer-phone VoLTE/VoWiFi tests
+from simulated emergency scenarios. Simulation can check code paths and modeled
+failures; it cannot confirm that a real emergency call reaches a responder or that
+a carrier delivers location. Preserve that evidence distinction without requiring
+unplanned live emergency calls to run this suite.
 
-- Full framework/app/daemon build, release AIDL freeze, enforcing policy and
-  native syscall-filter execution; package permissions and callback authentication.
-- Carrier/modem behavior, not just DCM packet behavior. The firmware controls
-  IMS signalling, emergency domain selection and radio fallback.
-- AML receiver profile and actual call/location correlation. GNSS-only collection
-  does not reproduce Google's fused-location quality. No-SIM/roaming profiles, emergency-SMS activation and framework broadcast
-  authentication require native and receiver verification despite host coverage.
-- Device crash/soak, low-memory, roaming, locked/before-unlock, dual-SIM changes,
-  radio loss, absent data subscription and end-to-end emergency lab cases.
+`tests/device-check` reads package/service presence, enforcing state and ADB-auth
+configuration for one explicit serial. Presence is a prerequisite, not functional
+acceptance. Native process recovery, permissions, actual modem/IMS interoperability,
+call audio, subscription switching, roaming and network loss need device evidence.
 
-Passing these host tests never changes those rows to PASS. The implementation
-must not be presented as working emergency calling or German AML on that basis.
-
-The [lab](../lab/README.md) adds configurable synthetic scenarios, a multi-country
-catalogue test, real host TLS on loopback, a standalone zero-permission APK and a
-read-only device prerequisite inventory. Lab reports label their evidence scope;
-no production receiver or native radio result is inferred. The production loader
-and harness share catalogue validation, selection and SMS eligibility logic.
+AML message encoding, country profiles, HTTPS/SMS delivery and the AML lab moved to
+[platform_packages_apps_EmergencyLocation](https://github.com/DiamaneOS/platform_packages_apps_EmergencyLocation).
+They remain deferred and are not part of this repository's active scope.
