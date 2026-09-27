@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+"""Read-only prerequisite inventory for one explicitly selected Android device."""
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+
+PACKAGES = ('org.diamaneos.imsbroker', 'org.diamaneos.emergencylocation',
+            'org.codeaurora.ims', 'com.google.android.iwlan', 'com.android.telephony.qns')
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--serial', required=True, help='Explicit adb device serial; never auto-selects')
+    parser.add_argument('--adb', default=shutil.which('adb'))
+    args = parser.parse_args()
+    if not args.adb: parser.error('adb not found; supply --adb')
+    def shell(*command, missing_ok=False):
+        result = subprocess.run([args.adb, '-s', args.serial, 'shell', *command],
+                                capture_output=True, text=True, timeout=20)
+        if result.returncode and not (missing_ok and result.returncode == 1
+                and not result.stdout.strip() and not result.stderr.strip()):
+            raise RuntimeError('read-only device query failed')
+        return result.stdout.strip()
+    enforcing = shell('getenforce') == 'Enforcing'
+    packages = {}
+    for name in PACKAGES:
+        output = shell('pm', 'path', name, missing_ok=True)
+        packages[name] = any(line.startswith('package:') for line in output.splitlines())
+    service = shell('service', 'list')
+    available = 'vendor.diamaneos.hardware.imsdcm.IImsDcm/default' in service
+    report = {'evidence':'read-only-prerequisites', 'selinux_enforcing':enforcing,
+              'adb_authentication_required':shell('getprop','ro.adb.secure') == '1',
+              'ims_dcm_service_listed':available, 'service_listing_is_not_functional_validation':True, 'packages':packages,
+              'carrier_registration_verified':False, 'emergency_delivery_verified':False}
+    print(json.dumps(report,indent=2))
+    return 0 if enforcing and available and all(packages.values()) else 1
+
+if __name__=='__main__':
+    try: sys.exit(main())
+    except (OSError,RuntimeError,subprocess.SubprocessError):
+        print('Device inventory failed; no device state was changed.',file=sys.stderr);sys.exit(2)
