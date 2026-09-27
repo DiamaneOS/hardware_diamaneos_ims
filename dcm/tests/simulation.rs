@@ -64,6 +64,21 @@ fn connected() -> Engine {
     e
 }
 #[test]
+fn modem_node_zero_is_valid_but_local_node_is_not_a_modem_peer() {
+    let mut e = Engine::new(0, 2).unwrap();
+    e.broker_connected();
+    let packet = activate(1, 1, 0, true, 0);
+    assert!(e.receive(Peer { node: 1, port: 100 }, &packet).is_empty());
+    assert_eq!(e.session_count(), 0);
+    let peer = Peer { node: 0, port: 100 };
+    let effects = e.receive(peer, &packet);
+    assert_eq!(request(&effects).key.kind, PdnType::Emergency);
+    assert_eq!(e.session_count(), 1);
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::Send(to, _) if *to == peer)));
+}
+#[test]
 fn golden_activate_response() {
     let mut e = connected();
     let out = e.receive(MODEM, &activate(0x1234, 1, 0, false, 0));
