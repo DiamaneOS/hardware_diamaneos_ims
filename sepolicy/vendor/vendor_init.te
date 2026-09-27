@@ -3,4 +3,4 @@
 # /vendor/build.prop entries are set with vendor_init's context
 # (system/core/init/property_service.cpp LoadProperties), so the build
 # defaults of the DCM switches need this.
-set_prop(vendor_init, diamaneos_imsdcm_prop)
+set_prop(vendor_init, vendor_diamaneos_imsdcm_prop)

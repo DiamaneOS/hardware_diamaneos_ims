@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The DiamaneOS Project
 # vendor.diamaneos.hardware.imsdcm.IImsDcm/default. Only the daemon may add it
-# (add_service in imsdcm.te) and only the broker is granted find;
-# protected_service keeps untrusted apps from ever being granted it.
+# (add_service in imsdcm.te). Platform diagnostics and system_app inherit
+# service discovery, but cannot call the daemon: imsdcm.te restricts inbound
+# Binder calls and the daemon authenticates the broker's UID on every method.
+# protected_service keeps untrusted apps from ever being granted discovery.
 type diamaneos_imsdcm_service, hal_service_type, protected_service, service_manager_type;
 
-neverallow { domain -diamaneos_ims_broker_app -diamaneos_imsdcm -servicemanager -su }
+neverallow { domain -diamaneos_ims_broker_app -diamaneos_imsdcm -servicemanager -su
+    -system_app -shell -traceur_app -atrace }
     diamaneos_imsdcm_service:service_manager find;
