@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The DiamaneOS Project
-# IMS network broker (org.diamaneos.imsbroker, system_ext privileged app,
+# IMS network broker (de.diamaneos.imsbroker, system_ext privileged app,
 # signed with the default application key, selected by seapp_contexts). It
 # files IMS and EIMS network requests with ConnectivityManager, looks up slot
 # subscriptions with SubscriptionManager, and talks binder with the vendor DCM

@@ -21,7 +21,7 @@
        outside the public SDK list).
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="org.diamaneos.imsbroker">
+    package="de.diamaneos.imsbroker">
 
     <uses-permission android:name="android.permission.CONNECTIVITY_USE_RESTRICTED_NETWORKS" />
     <uses-permission android:name="android.permission.INTERNET" />

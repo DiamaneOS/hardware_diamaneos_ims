@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-package org.diamaneos.wlan;
+package de.diamaneos.wlan;
 /** Protocol progress only. Never add network or subscriber identifiers here. */
 parcelable ReporterStatus {
     int primaryStage = -1;

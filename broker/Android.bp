@@ -26,16 +26,16 @@ android_app {
     system_ext_specific: true,
     privileged: true,
     required: [
-        "privapp-permissions-org.diamaneos.imsbroker.xml",
-        "sysconfig-org.diamaneos.imsbroker.xml",
+        "privapp-permissions-de.diamaneos.imsbroker.xml",
+        "sysconfig-de.diamaneos.imsbroker.xml",
     ],
 }
 
 java_test_host {
     name: "DiamaneOSImsBrokerHostTests",
     srcs: [
-        "src/org/diamaneos/imsbroker/Addresses.java",
-        "src/org/diamaneos/imsbroker/NetworkState.java",
+        "src/de/diamaneos/imsbroker/Addresses.java",
+        "src/de/diamaneos/imsbroker/NetworkState.java",
         "tests/src/**/*.java",
     ],
     static_libs: ["junit"],

@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0
  * Copyright 2026 The DiamaneOS Project
  */
-package org.diamaneos.imsbroker;
+package de.diamaneos.imsbroker;
 
 public final class NetworkStateTest {
     public static void main(String[] args) {

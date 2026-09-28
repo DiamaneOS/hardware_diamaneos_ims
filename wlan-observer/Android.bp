@@ -3,15 +3,15 @@ android_app {
     name: "DiamaneOSWlanObserver",
     srcs: ["src/**/*.java"],
     platform_apis: true,
-    static_libs: ["org.diamaneos.wlan-java"],
+    static_libs: ["de.diamaneos.wlan-java"],
     certificate: "platform",
     system_ext_specific: true,
     privileged: true,
-    required: ["sysconfig-org.diamaneos.wlanobserver.xml"],
+    required: ["sysconfig-de.diamaneos.wlanobserver.xml"],
 }
 prebuilt_etc {
-    name: "sysconfig-org.diamaneos.wlanobserver.xml",
+    name: "sysconfig-de.diamaneos.wlanobserver.xml",
     src: "sysconfig.xml",
-    filename: "sysconfig-org.diamaneos.wlanobserver.xml",
+    filename: "sysconfig-de.diamaneos.wlanobserver.xml",
     sub_dir: "sysconfig", system_ext_specific: true,
 }

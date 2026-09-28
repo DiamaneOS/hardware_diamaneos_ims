@@ -1,2 +1,2 @@
 # SPDX-License-Identifier: Apache-2.0
-org.diamaneos.wlan.IReporter/default u:object_r:diamaneos_wlan_reporter_service:s0
+de.diamaneos.wlan.IReporter/default u:object_r:diamaneos_wlan_reporter_service:s0

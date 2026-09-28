@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <policy><signer signature="@DIAMANEOS_WLAN_PLATFORM">
-    <package name="org.diamaneos.wlanobserver"><seinfo value="diamaneos_wlan_observer" /></package>
+    <package name="de.diamaneos.wlanobserver"><seinfo value="diamaneos_wlan_observer" /></package>
 </signer></policy>

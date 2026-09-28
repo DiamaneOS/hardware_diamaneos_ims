@@ -1,5 +1,30 @@
 # Verification and limits
 
+## FP6 development status
+
+Before the package namespace migration, the enforcing FP6 candidate demonstrated
+ordinary incoming/outgoing VoLTE and Wi-Fi calling, plain SMS in both directions,
+and mobile data on the two tested subscriptions. Calls also worked with an
+always-on VPN and lockdown enabled, and one active Wi-Fi-to-cellular call
+handover passed. VPN coexistence does not mean modem traffic traverses the VPN.
+
+Wi-Fi calling is not yet reliable across reconnection. A repeated idle reconnect
+left both IMS sessions unavailable despite acknowledged Wi-Fi reports; fresh
+modem activation requests arrived roughly ten minutes after release. The timer
+owner and root cause remain unproven. On another network, the observer rejected
+the link as having no usable addresses while Android reported validated Wi-Fi
+and the interface had usable IPv6 addresses. These are open investigations,
+not production acceptance.
+
+The reviewed, self-targeted Android telephony mock suites were also run on the
+development phone: 591 tests passed, none failed and five were skipped or subject
+to assumptions. This does not qualify real emergency calling, carrier location
+delivery or every carrier configuration. No real emergency call was placed.
+
+The `de.diamaneos` namespace migration needs its own platform and device checks;
+the earlier runtime results must not be attributed to a renamed build before it
+is tested.
+
 `tests/run-host-tests.sh` exercises the production Rust codec/state machine,
 Java network-callback state and emergency-APN merger. It uses no phone, QRTR
 publication, SMS or external network. Addresses are synthetic documentation values.

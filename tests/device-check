@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import sys
 
-PACKAGES = ('org.diamaneos.imsbroker', 'org.codeaurora.ims', 'com.android.carrierconfig')
+PACKAGES = ('de.diamaneos.imsbroker', 'org.codeaurora.ims', 'com.android.carrierconfig')
 IWLAN_PACKAGES = {
     'qti': ('vendor.qti.iwlan', 'vendor.qti.hardware.cacert.server'),
     'aosp': ('com.google.android.iwlan', 'com.android.telephony.qns'),

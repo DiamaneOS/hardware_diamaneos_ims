@@ -3,7 +3,7 @@
      SPDX-License-Identifier: Apache-2.0
      Copyright 2026 The DiamaneOS Project
 
-     Privileged permission of the IMS network broker (org.diamaneos.imsbroker,
+     Privileged permission of the IMS network broker (de.diamaneos.imsbroker,
      /system_ext/priv-app). It is signed with the default application key, not
      the platform key, so this list is its only source of privileged
      permissions.
@@ -16,7 +16,7 @@
      The broker requests no other privileged permission.
 -->
 <permissions>
-    <privapp-permissions package="org.diamaneos.imsbroker">
+    <privapp-permissions package="de.diamaneos.imsbroker">
         <permission name="android.permission.CONNECTIVITY_USE_RESTRICTED_NETWORKS" />
     </privapp-permissions>
 </permissions>

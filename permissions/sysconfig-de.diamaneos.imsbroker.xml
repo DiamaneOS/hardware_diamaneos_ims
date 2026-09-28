@@ -10,5 +10,5 @@
      while the package is a system app.
 -->
 <config>
-    <prevent-disable package="org.diamaneos.imsbroker" />
+    <prevent-disable package="de.diamaneos.imsbroker" />
 </config>

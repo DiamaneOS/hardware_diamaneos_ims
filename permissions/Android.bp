@@ -6,15 +6,15 @@
 // /system_ext/etc/permissions.
 
 prebuilt_etc {
-    name: "privapp-permissions-org.diamaneos.imsbroker.xml",
-    src: "privapp-permissions-org.diamaneos.imsbroker.xml",
+    name: "privapp-permissions-de.diamaneos.imsbroker.xml",
+    src: "privapp-permissions-de.diamaneos.imsbroker.xml",
     sub_dir: "permissions",
     system_ext_specific: true,
 }
 
 prebuilt_etc {
-    name: "sysconfig-org.diamaneos.imsbroker.xml",
-    src: "sysconfig-org.diamaneos.imsbroker.xml",
+    name: "sysconfig-de.diamaneos.imsbroker.xml",
+    src: "sysconfig-de.diamaneos.imsbroker.xml",
     sub_dir: "sysconfig",
     system_ext_specific: true,
 }
