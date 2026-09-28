@@ -203,10 +203,6 @@ impl Client {
         }
         if self.state.failed() {
             if self.retry_at == 0 {
-                eprintln!(
-                    "wlanreportd: subscription {} report failed; bounded retry",
-                    self.subscription
-                );
                 self.retry_at = now.saturating_add(30_000);
             }
             if now >= self.retry_at && self.failures < 3 {

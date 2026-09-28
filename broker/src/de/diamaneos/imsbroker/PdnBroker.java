@@ -11,6 +11,7 @@ import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
 import android.net.TelephonyNetworkSpecifier;
 import android.os.Binder;
+import android.os.Build;
 import android.os.Handler;
 import android.os.RemoteException;
 import android.telephony.SubscriptionManager;
@@ -54,10 +55,18 @@ import java.util.List;
  */
 final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
     private static final String TAG = "ImsBroker";
+    private static final boolean DEBUG = Build.isDebuggable();
+
+    private static void trace(PdnTracker tracker, String event) {
+        if (DEBUG) {
+            Log.i(TAG, "slot=" + tracker.slot + " type=" + tracker.type
+                    + " serial=" + tracker.serial + ": " + event);
+        }
+    }
 
     /**
      * The daemon's UID: AID_VENDOR_IMSDCM in vintf/config.fs. Keep the two equal; a mismatch makes
-     * the broker ignore the daemon (and log the UID).
+     * the broker ignore the daemon.
      */
     private static final int DAEMON_UID = 2990;
 
@@ -119,7 +128,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
             return;
         }
         if (!isValid(request)) {
-            Log.w(TAG, "invalid bring-up: slot=" + request.slot + " type=" + request.type);
+            Log.w(TAG, "invalid bring-up request");
             reportFailed(request, PdnFailure.INVALID_REQUEST);
             return;
         }
@@ -129,7 +138,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
             // Already held: no new request (telephony counts request churn as
             // an anomaly). Answer the new serial with the current state.
             tracker.serial = request.serial;
-            Log.i(TAG, tracker + ": bring-up for a held request");
+            trace(tracker, "bring-up for a held request");
             if (tracker.reported != null && !tracker.isSettling()) {
                 reportUp(tracker, tracker.reported);
             } else if (tracker.lost) {
@@ -139,7 +148,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
         }
         tracker = new PdnTracker(this, request);
         mTrackers.put(key, tracker);
-        Log.i(TAG, tracker + ": bring-up");
+        trace(tracker, "bring-up");
         fileRequest(tracker);
     }
 
@@ -152,7 +161,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
         if (tracker == null || tracker.serial != request.serial) {
             return;
         }
-        Log.i(TAG, tracker + ": release");
+        trace(tracker, "release");
         mTrackers.remove(key);
         unregister(tracker);
     }
@@ -212,7 +221,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
         if (tracker.slot != PdnRequest.SLOT_UNSPECIFIED) {
             int subId = SubscriptionManager.getSubscriptionId(tracker.slot);
             if (!SubscriptionManager.isUsableSubscriptionId(subId)) {
-                Log.i(TAG, tracker + ": waiting for an active subscription");
+                trace(tracker, "waiting for an active subscription");
                 return;
             }
             tracker.subId = subId;
@@ -224,14 +233,14 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
         } catch (RuntimeException e) {
             // SecurityException without the permission; also
             // IllegalArgumentException and TooManyRequestsException.
-            Log.e(TAG, tracker + ": request refused: " + e.getClass().getSimpleName());
+            Log.e(TAG, "IMS network request refused: " + e.getClass().getSimpleName());
             mTrackers.remove(key(tracker.slot, tracker.type));
             tracker.close();
             reportFailed(tracker.request(), PdnFailure.REQUEST_REJECTED);
             return;
         }
         tracker.filed = true;
-        Log.i(TAG, tracker + ": requested");
+        trace(tracker, "requested");
     }
 
     private void unregister(PdnTracker tracker) {
@@ -262,7 +271,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
         if (info == null) {
             if (tracker.reported != null) {
                 // Up before, but no longer a matching network: fail closed.
-                Log.w(TAG, tracker + ": network no longer matches");
+                trace(tracker, "network no longer matches");
                 tracker.reported = null;
                 tracker.lost = true;
                 reportDown(tracker);
@@ -274,22 +283,14 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
         }
         tracker.reported = info;
         tracker.lost = false;
-        Log.i(
-                TAG,
-                tracker
-                        + ": up, v4="
-                        + (info.ipv4Address.length > 0)
-                        + " v6="
-                        + (info.ipv6Address.length > 0)
-                        + " mtu="
-                        + info.mtu);
+        trace(tracker, "up");
         reportUp(tracker, info);
     }
 
     @Override
     public void onTrackerLost(PdnTracker tracker) {
         if (mTrackers.get(key(tracker.slot, tracker.type)) != tracker) return;
-        Log.i(TAG, tracker + ": lost");
+        trace(tracker, "lost");
         tracker.reported = null;
         tracker.lost = true;
         reportDown(tracker);
@@ -298,7 +299,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
     @Override
     public void onTrackerUnavailable(PdnTracker tracker) {
         if (mTrackers.get(key(tracker.slot, tracker.type)) != tracker) return;
-        Log.w(TAG, tracker + ": unavailable");
+        trace(tracker, "unavailable");
         // ConnectivityService has already removed the request.
         tracker.filed = false;
         tracker.close();
@@ -379,7 +380,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
         private boolean isFromDaemon() {
             int uid = Binder.getCallingUid();
             if (uid != DAEMON_UID) {
-                Log.w(TAG, "ignoring a call from uid " + uid);
+                Log.w(TAG, "ignoring an untrusted caller");
                 return false;
             }
             return true;
