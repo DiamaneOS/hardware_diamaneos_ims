@@ -3,7 +3,7 @@
  * Copyright 2026 The DiamaneOS Project
  */
 
-package org.diamaneos.imsbroker;
+package de.diamaneos.imsbroker;
 
 import android.app.Application;
 import android.os.Handler;

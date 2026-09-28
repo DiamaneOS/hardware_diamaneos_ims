@@ -1,5 +1,12 @@
 # Android integration
 
+- Project-owned app IDs and the private WLAN Binder interface use `de.diamaneos`.
+- Update the observer and reporter together: their Binder service name and
+  generated interface packages must match.
+- A renamed package is a new Android identity. The old app's data and
+  permission state do not migrate. Verify the broker's permission, system
+  allowlists and SELinux app domains on the resulting image.
+
 ## Steps
 
 Work on an integration branch. Passing host tests is no reason to select this
