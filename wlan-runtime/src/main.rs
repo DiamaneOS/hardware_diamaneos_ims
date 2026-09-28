@@ -4,6 +4,11 @@ use binder::{
     BinderFeatures, DeathRecipient, ExceptionCode, IBinder, Interface, ProcessState, SpIBinder,
     Status, ThreadState,
 };
+use de_diamaneos_wlan::aidl::de::diamaneos::wlan::{
+    IReporter::{BnReporter, IReporter},
+    ReporterStatus::ReporterStatus,
+    Snapshot::Snapshot,
+};
 use diamaneos_ims_dcm::{
     engine::Peer,
     qrtr::{Control, BYE, CTRL_PORT, DEL_SERVER, NEW_LOOKUP, NEW_SERVER},
@@ -14,11 +19,6 @@ use diamaneos_wlan_reporting::{
     Connected, DSD_SERVICE,
 };
 use diamaneos_wlan_runtime::Observations;
-use de_diamaneos_wlan::aidl::org::diamaneos::wlan::{
-    IReporter::{BnReporter, IReporter},
-    ReporterStatus::ReporterStatus,
-    Snapshot::Snapshot,
-};
 use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr},
