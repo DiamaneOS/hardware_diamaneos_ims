@@ -60,3 +60,26 @@ the codec can check address values but cannot know their real link state.
 
 See [the reporting design](wlan-reporting-design.md) for process isolation,
 permission review, lifecycle requirements and remaining integration gates.
+
+## Same-link DNS metadata
+
+- The stock `libwms.so` STA builder has IPv4 DNS slots at native offsets
+  0x28/0x30 and IPv6 DNS slots at 0x35/0x46. Its diagnostic format strings
+  name DNS addresses 1/2 and DNS V6 addresses 1/2.
+- The authenticated DSD IDL maps them to request 0x20 TLVs 0x13/0x14 (uint32
+  little-endian numeric IPv4) and 0x15/0x16 (16 IPv6 octets). Stock reverses
+  the IPv4 in_addr before storage. IPv6 is copied unchanged.
+- These are resolver addresses, not local interface addresses. No fabricated
+  resolver or fallback.
+- The observer supplies at most the first two distinct DNS servers per family
+  from the selected Wi-Fi LinkProperties, in order.
+- The Binder representation is fixed-size and validates counts. The codec
+  rejects unspecified, loopback, multicast, mapped-IPv6 and invalid IPv4
+  addresses, slot gaps and duplicates. Link-local resolvers are valid only in
+  the reported Wi-Fi link context.
+- DNS changes replace the desired snapshot, and stale pending reports are not
+  retried. Withdrawal carries no resolver metadata.
+- Like the stock report, this gives modem firmware the link's resolver
+  addresses. It issues no DNS queries and changes no Private DNS or VPN
+  settings. Diagnostics gain no SSID, signal measurement, optional capability,
+  packet contents or resolver address.
