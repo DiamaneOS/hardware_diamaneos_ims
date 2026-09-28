@@ -77,6 +77,24 @@ struct Group {
     request: Request,
     network: Option<Network>,
 }
+/// Bounded lifecycle metadata only: no addresses, APNs, handles or peer identities.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Diagnostics {
+    pub broker_connected: bool,
+    pub active_sessions: usize,
+    pub active_groups: usize,
+    pub sessions_by_slot: [usize; 4], // unspecified, then slots 0..2
+    pub requests: u64,
+    pub malformed: u64,
+    pub last_request: u16,
+    pub up_reports: u64,
+    pub down_reports: u64,
+    pub stale_reports: u64,
+    pub broker_registrations: u64,
+    pub broker_losses: u64,
+    pub client_losses: u64,
+    pub modem_losses: u64,
+}
 /// Device configuration fixes the modem node and number of slots; no first-packet trust.
 pub struct Engine {
     modem_node: u32,
@@ -87,6 +105,7 @@ pub struct Engine {
     sessions: Vec<Session>,
     groups: BTreeMap<Key, Group>,
     indications: BTreeMap<Peer, u16>,
+    diagnostics: Diagnostics,
 }
 impl Engine {
     pub fn new(modem_node: u32, slots: u32) -> Result<Self, &'static str> {
@@ -102,10 +121,22 @@ impl Engine {
             sessions: vec![],
             groups: BTreeMap::new(),
             indications: BTreeMap::new(),
+            diagnostics: Diagnostics::default(),
         })
     }
     pub fn session_count(&self) -> usize {
         self.sessions.len()
+    }
+    pub fn diagnostics(&self) -> Diagnostics {
+        let mut result = self.diagnostics;
+        result.broker_connected = self.broker;
+        result.active_sessions = self.sessions.len();
+        result.active_groups = self.groups.len();
+        for session in &self.sessions {
+            // Activation validates the slot before creating a session.
+            result.sessions_by_slot[(session.activation.slot + 1) as usize] += 1;
+        }
+        result
     }
     fn next_serial(&mut self) -> Option<i32> {
         self.serial = self.serial.checked_add(1)?;
@@ -126,6 +157,8 @@ impl Engine {
         }
     }
     pub fn broker_connected(&mut self) -> Vec<Effect> {
+        self.diagnostics.broker_registrations =
+            self.diagnostics.broker_registrations.saturating_add(1);
         // Replacement is a new epoch: old reports cannot revive a released request.
         self.broker = true;
         let keys: Vec<_> = self.groups.keys().copied().collect();
@@ -144,6 +177,7 @@ impl Engine {
         out
     }
     pub fn broker_lost(&mut self) -> Vec<Effect> {
+        self.diagnostics.broker_losses = self.diagnostics.broker_losses.saturating_add(1);
         self.broker = false;
         let peers: Vec<_> = self.indications.keys().copied().collect();
         let mut out = vec![];
@@ -161,11 +195,17 @@ impl Engine {
         }
     }
     pub fn peer_gone(&mut self, peer: Peer) -> Vec<Effect> {
+        if self.sessions.iter().any(|s| s.peer == peer) {
+            self.diagnostics.client_losses = self.diagnostics.client_losses.saturating_add(1);
+        }
         self.sessions.retain(|s| s.peer != peer);
         self.indications.remove(&peer);
         self.release_unused()
     }
     pub fn node_gone(&mut self, node: u32) -> Vec<Effect> {
+        if node == self.modem_node {
+            self.diagnostics.modem_losses = self.diagnostics.modem_losses.saturating_add(1);
+        }
         self.sessions.retain(|s| s.peer.node != node);
         self.indications.retain(|p, _| p.node != node);
         self.release_unused()
@@ -218,11 +258,14 @@ impl Engine {
                 .get(&request.key)
                 .is_some_and(|g| g.request == request)
         {
+            self.diagnostics.stale_reports = self.diagnostics.stale_reports.saturating_add(1);
             return vec![];
         }
         let Some(network) = network.filter(Network::valid) else {
+            self.diagnostics.down_reports = self.diagnostics.down_reports.saturating_add(1);
             return self.fail_matching(|s| Self::group_key(&s.activation) == request.key);
         };
+        self.diagnostics.up_reports = self.diagnostics.up_reports.saturating_add(1);
         self.groups.get_mut(&request.key).unwrap().network = Some(network.clone());
         let mut out = vec![];
         let ids: Vec<_> = self
@@ -263,6 +306,7 @@ impl Engine {
         let frame = match Frame::parse(bytes) {
             Ok(f) => f,
             Err(_) => {
+                self.diagnostics.malformed = self.diagnostics.malformed.saturating_add(1);
                 if bytes.len() >= 7 && bytes.len() <= p::MAX_DATAGRAM && bytes[0] == 0 {
                     return vec![Effect::Send(
                         peer,
@@ -281,11 +325,14 @@ impl Engine {
             return vec![];
         }
         if p::validate_request(&frame).is_err() {
+            self.diagnostics.malformed = self.diagnostics.malformed.saturating_add(1);
             return vec![Effect::Send(
                 peer,
                 p::response(frame.txn, frame.id, 1, 0x3a),
             )];
         }
+        self.diagnostics.requests = self.diagnostics.requests.saturating_add(1);
+        self.diagnostics.last_request = frame.id;
         match frame.id {
             p::ACTIVATE => self.activate(peer, &frame),
             p::DEACTIVATE => self.deactivate(peer, &frame),

@@ -41,3 +41,22 @@ call audio, subscription switching, roaming and network loss need device evidenc
 AML message encoding, country profiles, HTTPS/SMS delivery and the AML lab moved to
 [platform_packages_apps_EmergencyLocation](https://github.com/DiamaneOS/platform_packages_apps_EmergencyLocation).
 They remain deferred and are not part of this repository's active scope.
+
+## DCM lifecycle diagnostics
+
+The existing Binder dump transaction exposes a fixed snapshot of lifecycle
+counters to UID 0 only. It accepts no arguments and does not issue modem commands.
+It reports current session/group counts, counts by configured slot, validated
+request count and last message ID, malformed-frame count, broker/network reports,
+and client/modem losses. It contains no APN, IP address, network handle, payload,
+peer port or subscriber identifier. Counters saturate rather than wrap and reset
+with the daemon process. The snapshot lock is released before writing to the
+caller-provided output descriptor.
+
+Use this only in an authorized privileged diagnostic session; do not grant shell
+or application domains additional Binder access merely to read it. A request
+count that stops advancing does not distinguish an absent modem request from a
+packet lost before the daemon. Successful reports still require independent IMS
+registration and call evidence. Host tests exercise the diagnostic snapshot
+through real state transitions; native dump access and runtime behavior require
+separate platform/device checks.
