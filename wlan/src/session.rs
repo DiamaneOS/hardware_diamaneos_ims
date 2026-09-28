@@ -42,6 +42,19 @@ pub struct Session {
     sending: Option<Observation>,
     confirmed: Option<Observation>,
     previous_bssid: [u8; 6],
+    failed_operation: u16,
+    error: i32,
+}
+
+/// Fixed numeric diagnostics, with no observation or packet data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Diagnostics {
+    /// Bind, clear, switch, status, settled-down, settled-up, failed.
+    pub stage: i32,
+    pub operation: u16,
+    /// 0: no failure; positive: QMI error; -1: timeout; -2: transaction
+    /// exhaustion; -3: local encoding failure.
+    pub error: i32,
 }
 
 impl Session {
@@ -58,6 +71,8 @@ impl Session {
             sending: None,
             confirmed: None,
             previous_bssid: [0; 6],
+            failed_operation: 0,
+            error: 0,
         })
     }
 
@@ -85,6 +100,23 @@ impl Session {
         self.step == Step::Idle && self.confirmed.as_ref() == Some(&self.desired)
     }
 
+    pub fn diagnostics(&self) -> Diagnostics {
+        let stage = match self.step {
+            Step::Bind => 0,
+            Step::Clear => 1,
+            Step::Switch => 2,
+            Step::Status => 3,
+            Step::Idle if self.confirmed.as_ref().is_some_and(|s| s.network.is_some()) => 5,
+            Step::Idle => 4,
+            Step::Failed => 6,
+        };
+        Diagnostics {
+            stage,
+            operation: self.pending_message().unwrap_or(self.failed_operation),
+            error: self.error,
+        }
+    }
+
     /// Retries preserve transaction and payload. Exhaustion requires a fresh
     /// QRTR endpoint; this instance never wraps and reuses a transaction ID.
     pub fn poll(&mut self, now_ms: u64) -> Option<Vec<u8>> {
@@ -102,6 +134,8 @@ impl Session {
                 return self.poll(now_ms);
             }
             if pending.attempts >= MAX_ATTEMPTS {
+                self.failed_operation = pending.message;
+                self.error = -1;
                 self.pending = None;
                 self.step = Step::Failed;
                 return None;
@@ -115,6 +149,7 @@ impl Session {
         }
         let tx = self.next_transaction;
         let Some(next) = tx.checked_add(1) else {
+            self.error = -2;
             self.step = Step::Failed;
             return None;
         };
@@ -142,6 +177,8 @@ impl Session {
             _ => return None,
         };
         let Ok(packet) = packet else {
+            self.failed_operation = message;
+            self.error = -3;
             self.step = Step::Failed;
             return None;
         };
@@ -163,7 +200,9 @@ impl Session {
         };
         match response_for(bytes, p.transaction, p.message) {
             Ok(()) => {}
-            Err(crate::Error::ModemFailure(_)) => {
+            Err(crate::Error::ModemFailure(error)) => {
+                self.failed_operation = p.message;
+                self.error = i32::from(error);
                 self.pending = None;
                 self.step = Step::Failed;
                 return;
