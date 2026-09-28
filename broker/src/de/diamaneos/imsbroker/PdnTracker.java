@@ -190,13 +190,4 @@ final class PdnTracker extends ConnectivityManager.NetworkCallback {
         mListener.onTrackerUnavailable(this);
     }
 
-    @Override
-    public String toString() {
-        return "slot="
-                + slot
-                + " type="
-                + (type == PdnType.EMERGENCY ? "EMERGENCY" : "IMS")
-                + " serial="
-                + serial;
-    }
 }

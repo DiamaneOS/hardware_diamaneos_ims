@@ -13,6 +13,7 @@ import android.net.wifi.SupplicantState;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Binder;
+import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
@@ -31,6 +32,7 @@ import de.diamaneos.wlan.ReporterStatus;
 /** Passive primary-user observations; no exported components, scans or network setters. */
 public final class ObserverApp extends Application {
     private static final String SERVICE = "de.diamaneos.wlan.IReporter/default";
+    private static final boolean DEBUG = Build.isDebuggable();
     private Handler handler;
     private ConnectivityManager connectivity;
     private WifiManager wifi;
@@ -40,10 +42,6 @@ public final class ObserverApp extends Application {
     private long generation;
     private long sequence;
     private String lastStatus;
-    private int observationState = -1;
-    private String lastObservation;
-    private int addressCount;
-    private int addressRejections;
     private final Runnable heartbeat = new Runnable() {
         @Override public void run() {
             publish();
@@ -76,12 +74,8 @@ public final class ObserverApp extends Application {
     }
 
     private Snapshot read() {
-        addressCount = 0;
-        addressRejections = 0;
         Snapshot result = disconnected(wifi.isWifiEnabled());
-        observationState = 0; // Wi-Fi disabled.
         if (!result.enabled) return result;
-        observationState = 1; // No eligible Internet-capable non-VPN Wi-Fi link.
         Network selected = null;
         NetworkCapabilities selectedCaps = null;
         // Do not mix identities/addresses from multiple simultaneous Wi-Fi links.
@@ -91,41 +85,29 @@ public final class ObserverApp extends Application {
             if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
                     || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                     || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) continue;
-            if (selected != null) { observationState = 2; return result; }
+            if (selected != null) return result;
             selected = network; selectedCaps = caps;
         }
         if (selected == null) return result;
-        observationState = 3; // Association unavailable or incomplete.
         WifiInfo info = wifi.getConnectionInfo();
         if (info == null || info.getSupplicantState() != SupplicantState.COMPLETED) return result;
-        observationState = 4; // Missing, redacted or unusable link identity.
         String value = info.getBSSID();
         if (value == null || !value.matches("(?i)[0-9a-f]{2}(:[0-9a-f]{2}){5}")) return result;
         String[] parts = value.split(":");
         for (int i = 0; i < 6; i++) result.bssid[i] = (byte) Integer.parseInt(parts[i], 16);
         if ((result.bssid[0] & 1) != 0 || value.equals("00:00:00:00:00:00")
                 || value.equals("02:00:00:00:00:00")) return disconnected(result.enabled);
-        observationState = 5; // Association does not match selected network.
         if (selectedCaps.getTransportInfo() instanceof WifiInfo transportInfo
                 && transportInfo.getNetworkId() >= 0
                 && transportInfo.getNetworkId() != info.getNetworkId()) return disconnected(result.enabled);
-        observationState = 6; // Link properties unavailable.
         LinkProperties links = connectivity.getLinkProperties(selected);
         if (links == null) return disconnected(result.enabled);
         for (LinkAddress link : links.getLinkAddresses()) {
-            addressCount++;
-            int flags = link.getFlags();
+            int bad = OsConstants.IFA_F_TENTATIVE | OsConstants.IFA_F_DADFAILED
+                    | OsConstants.IFA_F_DEPRECATED;
             InetAddress ip = link.getAddress();
-            // Fixed categories only: never expose addresses, prefixes or lifetimes.
-            int rejected = ((flags & OsConstants.IFA_F_TENTATIVE) != 0 ? 1 : 0)
-                    | ((flags & OsConstants.IFA_F_DADFAILED) != 0 ? 2 : 0)
-                    | ((flags & OsConstants.IFA_F_DEPRECATED) != 0 ? 4 : 0)
-                    | (ip.isAnyLocalAddress() ? 8 : 0)
-                    | (ip.isLoopbackAddress() ? 16 : 0)
-                    | (ip.isLinkLocalAddress() ? 32 : 0)
-                    | (ip.isMulticastAddress() ? 64 : 0);
-            addressRejections |= rejected;
-            if (rejected != 0) continue;
+            if ((link.getFlags() & bad) != 0 || ip.isAnyLocalAddress() || ip.isLoopbackAddress()
+                    || ip.isLinkLocalAddress() || ip.isMulticastAddress()) continue;
             if (ip instanceof Inet4Address && !result.hasIpv4) {
                 result.ipv4 = ip.getAddress(); result.hasIpv4 = true;
             } else if (ip instanceof Inet6Address && !result.hasIpv6) {
@@ -142,16 +124,13 @@ public final class ObserverApp extends Application {
                 System.arraycopy(dns.getAddress(), 0, result.dns6, 16 * result.dns6Count++, 16);
             }
         }
-        observationState = 7; // Association changed while reading the snapshot.
         WifiInfo after = wifi.getConnectionInfo();
         NetworkCapabilities capsAfter = connectivity.getNetworkCapabilities(selected);
         if (after == null || after.getNetworkId() != info.getNetworkId()
                 || !value.equals(after.getBSSID()) || capsAfter == null) return disconnected(result.enabled);
         result.connected = result.hasIpv4 || result.hasIpv6;
-        observationState = result.connected ? 9 : 8; // Connected or no usable addresses.
         result.validated = selectedCaps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
                 && capsAfter.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
-        if (result.connected && result.validated) observationState = 10;
         return result;
     }
 
@@ -171,14 +150,6 @@ public final class ObserverApp extends Application {
         final Snapshot snapshot;
         try {
             snapshot = read();
-            String observation = "observation=" + observationState;
-            if (observationState == 8) {
-                observation += " addresses=" + addressCount + " rejected=" + addressRejections;
-            }
-            if (!observation.equals(lastObservation)) {
-                Log.i("WlanReporting", observation);
-                lastObservation = observation;
-            }
         } catch (RuntimeException ignored) {
             unavailable("Observation read unavailable");
             return; // No refresh: the existing observation lease will expire.
@@ -198,13 +169,23 @@ public final class ObserverApp extends Application {
             }
             if (sequence == Long.MAX_VALUE) { reporter = null; return; }
             reporter.observe(generation, ++sequence, snapshot);
-            ReporterStatus status = reporter.getStatus(generation);
-            String summary = "primary=" + status.primaryStage + "/" + status.primaryOperation
-                    + "/" + status.primaryError + " secondary=" + status.secondaryStage
-                    + "/" + status.secondaryOperation + "/" + status.secondaryError;
-            if (!summary.equals(lastStatus)) {
-                Log.i("WlanReporting", summary);
-                lastStatus = summary;
+            if (DEBUG) {
+                try {
+                    ReporterStatus status = reporter.getStatus(generation);
+                    String summary = "primary=" + status.primaryStage + "/" + status.primaryOperation
+                            + "/" + status.primaryError + " secondary=" + status.secondaryStage
+                            + "/" + status.secondaryOperation + "/" + status.secondaryError;
+                    if (!summary.equals(lastStatus)) {
+                        Log.i("WlanReporting", summary);
+                        lastStatus = summary;
+                    }
+                } catch (RemoteException | RuntimeException ignored) {
+                    // A diagnostic read must not invalidate successful delivery.
+                    unavailable("Reporter status unavailable");
+                }
+            } else {
+                // Successful delivery ends any preceding operational error episode.
+                lastStatus = null;
             }
         } catch (RemoteException | RuntimeException ignored) {
             // No payload/exception logging. Failure cannot refresh the observation
