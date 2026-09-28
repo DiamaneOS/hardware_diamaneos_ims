@@ -165,3 +165,11 @@ local encoding failure. Status is sampled asynchronously; it does not establish
 IMS registration or call acceptance. An unavailable diagnostic connection cannot
 renew an observation lease. Both endpoints and their generated interface libraries
 must be updated together as part of the coherent OS build.
+
+The observer also logs a numeric observation state only when it changes: 0 Wi-Fi
+disabled; 1 no eligible non-VPN Wi-Fi link; 2 multiple eligible links; 3 incomplete
+association; 4 unavailable/redacted identity; 5 selected-network mismatch;
+6 missing link properties; 7 association changed during the read; 8 no usable
+addresses; 9 connected but unvalidated; 10 connected and validated. These values
+explain why an observation is withheld without revealing link identifiers or
+addresses. They describe the observer snapshot, not modem/carrier acceptance.

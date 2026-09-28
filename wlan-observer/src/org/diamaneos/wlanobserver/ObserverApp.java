@@ -40,6 +40,8 @@ public final class ObserverApp extends Application {
     private long generation;
     private long sequence;
     private String lastStatus;
+    private int observationState = -1;
+    private int lastObservationState = -1;
     private final Runnable heartbeat = new Runnable() {
         @Override public void run() {
             publish();
@@ -73,7 +75,9 @@ public final class ObserverApp extends Application {
 
     private Snapshot read() {
         Snapshot result = disconnected(wifi.isWifiEnabled());
+        observationState = 0; // Wi-Fi disabled.
         if (!result.enabled) return result;
+        observationState = 1; // No eligible Internet-capable non-VPN Wi-Fi link.
         Network selected = null;
         NetworkCapabilities selectedCaps = null;
         // Do not mix identities/addresses from multiple simultaneous Wi-Fi links.
@@ -83,21 +87,25 @@ public final class ObserverApp extends Application {
             if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
                     || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                     || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) continue;
-            if (selected != null) return result;
+            if (selected != null) { observationState = 2; return result; }
             selected = network; selectedCaps = caps;
         }
         if (selected == null) return result;
+        observationState = 3; // Association unavailable or incomplete.
         WifiInfo info = wifi.getConnectionInfo();
         if (info == null || info.getSupplicantState() != SupplicantState.COMPLETED) return result;
+        observationState = 4; // Missing, redacted or unusable link identity.
         String value = info.getBSSID();
         if (value == null || !value.matches("(?i)[0-9a-f]{2}(:[0-9a-f]{2}){5}")) return result;
         String[] parts = value.split(":");
         for (int i = 0; i < 6; i++) result.bssid[i] = (byte) Integer.parseInt(parts[i], 16);
         if ((result.bssid[0] & 1) != 0 || value.equals("00:00:00:00:00:00")
                 || value.equals("02:00:00:00:00:00")) return disconnected(result.enabled);
+        observationState = 5; // Association does not match selected network.
         if (selectedCaps.getTransportInfo() instanceof WifiInfo transportInfo
                 && transportInfo.getNetworkId() >= 0
                 && transportInfo.getNetworkId() != info.getNetworkId()) return disconnected(result.enabled);
+        observationState = 6; // Link properties unavailable.
         LinkProperties links = connectivity.getLinkProperties(selected);
         if (links == null) return disconnected(result.enabled);
         for (LinkAddress link : links.getLinkAddresses()) {
@@ -121,13 +129,16 @@ public final class ObserverApp extends Application {
                 System.arraycopy(dns.getAddress(), 0, result.dns6, 16 * result.dns6Count++, 16);
             }
         }
+        observationState = 7; // Association changed while reading the snapshot.
         WifiInfo after = wifi.getConnectionInfo();
         NetworkCapabilities capsAfter = connectivity.getNetworkCapabilities(selected);
         if (after == null || after.getNetworkId() != info.getNetworkId()
                 || !value.equals(after.getBSSID()) || capsAfter == null) return disconnected(result.enabled);
         result.connected = result.hasIpv4 || result.hasIpv6;
+        observationState = result.connected ? 9 : 8; // Connected or no usable addresses.
         result.validated = selectedCaps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
                 && capsAfter.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+        if (result.connected && result.validated) observationState = 10;
         return result;
     }
 
@@ -147,6 +158,10 @@ public final class ObserverApp extends Application {
         final Snapshot snapshot;
         try {
             snapshot = read();
+            if (observationState != lastObservationState) {
+                Log.i("WlanReporting", "observation=" + observationState);
+                lastObservationState = observationState;
+            }
         } catch (RuntimeException ignored) {
             unavailable("Observation read unavailable");
             return; // No refresh: the existing observation lease will expire.
