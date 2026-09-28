@@ -3,7 +3,8 @@
 `wlan/` is a memory-safe, socket-free codec for an observed subset of Qualcomm
 DSD STA reporting. The pure codec is host-tested and is used by the opt-in reporter candidate.
 It cannot send modem requests, observe Wi-Fi, publish a service or change routing.
-It is not a functional replacement for CNE and has not been device-qualified.
+It does not replace the full CNE stack. Basic FP6 calling has been demonstrated
+with the adapter, while reconnect and broader lifecycle qualification remain open.
 
 The wire subset was independently bound to the authenticated FP6.QREL.16.100.0
 `libqmiservices.so` IDL descriptors and the `libwms.so` STA builder plus
@@ -17,6 +18,8 @@ format is described by [Qualcomm's QMI framework](https://github.com/qualcomm/qm
 | TLV `0x01` | Required six-byte BSSID |
 | TLV `0x10` | Optional IPv4 address as a little-endian numeric uint32 |
 | TLV `0x11` | Optional 16 IPv6 octets followed by a one-byte prefix length |
+| TLVs `0x13`, `0x14` | Optional first/second IPv4 DNS server as little-endian numeric uint32 |
+| TLVs `0x15`, `0x16` | Optional first/second IPv6 DNS server as 16 octets |
 | TLV `0x1f` | Optional uint32 Wi-Fi mode; observed STA value 2 |
 | TLV `0x21` | Optional uint32 connection state; 0 disconnected, 1 not validated, 2 validated |
 | Response | Result-only TLV `0x02`, uint16 result and error |
@@ -30,10 +33,10 @@ one. This variation also needs device qualification.
 The observed stock update path uses `0x20` with state 0 for disconnection. Do not
 infer that adjacent request `0x21` is the correct lifecycle operation. Withdrawal
 in this codec is bound to a previously validated observation and retains its real
-BSSID while omitting addresses. The private candidate also tests state0 with a zero BSSID to reconcile unknown
-previous state. This is a disconnected-control placeholder, never an available
-network identity. Its firmware acceptance remains a release gate; the sender
-requires a successful response before progressing.
+BSSID while omitting addresses. Startup uses state0 with a zero BSSID to reconcile unknown previous state.
+This is a disconnected-control placeholder, never an available network identity.
+The tested FP6 firmware acknowledges this form; each new firmware integration
+must qualify it. The sender requires a successful response before progressing.
 
 The response parser checks framing, kind, message and transaction, fixed result
 layout, and success/error consistency. Its caller must additionally validate the

@@ -92,7 +92,8 @@ The following transitions require explicit protocol and simulation evidence:
   guarantee that the modem has forgotten an earlier availability announcement.
 
 A heartbeat/expiry mechanism can bound stale observer state while the reporter
-is alive. It cannot guarantee withdrawal after reporter failure or modem
+is running and scheduled. It does not itself wake a suspended device; suspend
+and resumption behavior require their own device tests. It cannot guarantee withdrawal after reporter failure or modem
 unresponsiveness. Do not hide this limitation by resetting the radio, changing
 persistent modem settings or claiming unconditional fail-closed behavior.
 
@@ -133,9 +134,8 @@ Selection is explicit through the two opt-in makefiles. The existing DCM broker
 must not be described as implementing this path. The reporter currently binds the
 configured primary/secondary DSD contexts, clears STA status before announcing a
 snapshot, reports the actual Wi-Fi switch state and bounded same-link DNS metadata, and requires acknowledgements.
-It advertises no optional capabilities or fabricated WQE quality. Firmware
-acceptance of the zero-BSSID disconnected startup form is a test-candidate gate;
-a rejection stops that session rather than skipping reconciliation.
+It advertises no optional capabilities or fabricated WQE quality. The tested firmware acknowledges the zero-BSSID disconnected startup form;
+a rejection on any firmware stops that session rather than skipping reconciliation.
 
 The observer handles one unambiguous connected Internet-capable Wi-Fi network.
 It withdraws on ambiguous multi-STA observations, loss, revocation or expiry.
