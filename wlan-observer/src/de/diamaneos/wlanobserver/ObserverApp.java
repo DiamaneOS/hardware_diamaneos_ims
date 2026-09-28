@@ -41,7 +41,9 @@ public final class ObserverApp extends Application {
     private long sequence;
     private String lastStatus;
     private int observationState = -1;
-    private int lastObservationState = -1;
+    private String lastObservation;
+    private int addressCount;
+    private int addressRejections;
     private final Runnable heartbeat = new Runnable() {
         @Override public void run() {
             publish();
@@ -74,6 +76,8 @@ public final class ObserverApp extends Application {
     }
 
     private Snapshot read() {
+        addressCount = 0;
+        addressRejections = 0;
         Snapshot result = disconnected(wifi.isWifiEnabled());
         observationState = 0; // Wi-Fi disabled.
         if (!result.enabled) return result;
@@ -109,10 +113,19 @@ public final class ObserverApp extends Application {
         LinkProperties links = connectivity.getLinkProperties(selected);
         if (links == null) return disconnected(result.enabled);
         for (LinkAddress link : links.getLinkAddresses()) {
-            int bad = OsConstants.IFA_F_TENTATIVE | OsConstants.IFA_F_DADFAILED | OsConstants.IFA_F_DEPRECATED;
+            addressCount++;
+            int flags = link.getFlags();
             InetAddress ip = link.getAddress();
-            if ((link.getFlags() & bad) != 0 || ip.isAnyLocalAddress() || ip.isLoopbackAddress()
-                    || ip.isLinkLocalAddress() || ip.isMulticastAddress()) continue;
+            // Fixed categories only: never expose addresses, prefixes or lifetimes.
+            int rejected = ((flags & OsConstants.IFA_F_TENTATIVE) != 0 ? 1 : 0)
+                    | ((flags & OsConstants.IFA_F_DADFAILED) != 0 ? 2 : 0)
+                    | ((flags & OsConstants.IFA_F_DEPRECATED) != 0 ? 4 : 0)
+                    | (ip.isAnyLocalAddress() ? 8 : 0)
+                    | (ip.isLoopbackAddress() ? 16 : 0)
+                    | (ip.isLinkLocalAddress() ? 32 : 0)
+                    | (ip.isMulticastAddress() ? 64 : 0);
+            addressRejections |= rejected;
+            if (rejected != 0) continue;
             if (ip instanceof Inet4Address && !result.hasIpv4) {
                 result.ipv4 = ip.getAddress(); result.hasIpv4 = true;
             } else if (ip instanceof Inet6Address && !result.hasIpv6) {
@@ -158,9 +171,13 @@ public final class ObserverApp extends Application {
         final Snapshot snapshot;
         try {
             snapshot = read();
-            if (observationState != lastObservationState) {
-                Log.i("WlanReporting", "observation=" + observationState);
-                lastObservationState = observationState;
+            String observation = "observation=" + observationState;
+            if (observationState == 8) {
+                observation += " addresses=" + addressCount + " rejected=" + addressRejections;
+            }
+            if (!observation.equals(lastObservation)) {
+                Log.i("WlanReporting", observation);
+                lastObservation = observation;
             }
         } catch (RuntimeException ignored) {
             unavailable("Observation read unavailable");

@@ -69,6 +69,16 @@ They remain deferred and are not part of this repository's active scope.
 
 ## DCM lifecycle diagnostics
 
+The WLAN observer logs its numeric observation state only when it changes.
+State 8 means no accepted link address; it also reports the address count and a
+bitmask of rejection categories: tentative 1, DAD failure 2, deprecated 4,
+unspecified 8, loopback 16, link-local 32 and multicast 64. The mask is the union
+across the observed addresses. It contains no address, prefix or lifetime and
+does not change address eligibility. A zero count distinguishes an empty API
+result from filtering. Android can synthesize the deprecated flag from the
+stored address lifetime, so compare API and kernel observations before changing
+eligibility rules.
+
 The existing Binder dump transaction exposes a fixed snapshot of lifecycle
 counters to UID 0 only. It accepts no arguments and does not issue modem commands.
 It reports current session/group counts, counts by configured slot, validated
