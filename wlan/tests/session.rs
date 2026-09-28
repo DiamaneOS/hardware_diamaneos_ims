@@ -139,3 +139,37 @@ fn new_modem_session_rebinds_and_clears_before_replaying() {
     restarted.receive(&ack(&bind));
     assert_eq!(restarted.poll(1).unwrap()[3], 0x20);
 }
+
+#[test]
+fn resolver_change_replaces_pending_status_and_is_acknowledged() {
+    let mut s = Session::new(1).unwrap();
+    let mut old = connected();
+    old.network = Some(
+        old.network
+            .unwrap()
+            .with_dns([Some("192.0.2.53".parse().unwrap()), None], [None; 2])
+            .unwrap(),
+    );
+    s.observe(old.clone());
+    ready(&mut s);
+    let mut next = old.clone();
+    next.network = Some(
+        next.network
+            .unwrap()
+            .with_dns([Some("192.0.2.54".parse().unwrap()), None], [None; 2])
+            .unwrap(),
+    );
+    s.observe(next);
+    let switch = s.poll(1).unwrap();
+    s.receive(&ack(&switch));
+    let stale = s.poll(2).unwrap();
+    s.observe(old);
+    let replacement = s.poll(2002).unwrap();
+    assert_ne!(&stale[1..3], &replacement[1..3]);
+    s.receive(&ack(&stale));
+    assert!(!s.settled());
+    s.receive(&ack(&replacement));
+    let status = s.poll(2003).unwrap();
+    s.receive(&ack(&status));
+    assert!(s.settled());
+}

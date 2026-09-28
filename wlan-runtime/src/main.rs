@@ -112,8 +112,30 @@ impl IReporter for Service {
             let v6 = snapshot
                 .hasIpv6
                 .then(|| (Ipv6Addr::from(snapshot.ipv6), snapshot.ipv6Prefix as u8));
+            if !(0..=2).contains(&snapshot.dns4Count) || !(0..=2).contains(&snapshot.dns6Count) {
+                return Err(invalid());
+            }
+            let mut dns4 = [None; 2];
+            let mut dns6 = [None; 2];
+            for (index, bytes) in snapshot.dns4.chunks_exact(4).enumerate() {
+                if index < snapshot.dns4Count as usize {
+                    dns4[index] = Some(Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3]));
+                } else if bytes.iter().any(|b| *b != 0) {
+                    return Err(invalid());
+                }
+            }
+            for (index, bytes) in snapshot.dns6.chunks_exact(16).enumerate() {
+                if index < snapshot.dns6Count as usize {
+                    let mut address = [0; 16];
+                    address.copy_from_slice(bytes);
+                    dns6[index] = Some(Ipv6Addr::from(address));
+                } else if bytes.iter().any(|b| *b != 0) {
+                    return Err(invalid());
+                }
+            }
             Some(
                 Connected::new(snapshot.bssid, v4, v6, snapshot.validated)
+                    .and_then(|network| network.with_dns(dns4, dns6))
                     .map_err(|_| invalid())?,
             )
         } else {

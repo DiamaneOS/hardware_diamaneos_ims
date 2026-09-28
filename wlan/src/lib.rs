@@ -20,6 +20,7 @@ pub enum Error {
     InvalidBssid,
     InvalidAddress,
     MissingAddress,
+    InvalidDnsAddress,
     ZeroTransaction,
     MalformedResponse,
     WrongTransaction,
@@ -34,6 +35,8 @@ pub struct Connected {
     ipv4: Option<Ipv4Addr>,
     ipv6: Option<(Ipv6Addr, u8)>,
     validated: bool,
+    dns4: [Option<Ipv4Addr>; 2],
+    dns6: [Option<Ipv6Addr>; 2],
 }
 
 impl Connected {
@@ -79,11 +82,51 @@ impl Connected {
             ipv4,
             ipv6,
             validated,
+            dns4: [None; 2],
+            dns6: [None; 2],
         })
     }
 
+    /// Resolvers observed on this same Wi-Fi link. No resolution or fallback.
+    pub fn with_dns(
+        mut self,
+        dns4: [Option<Ipv4Addr>; 2],
+        dns6: [Option<Ipv6Addr>; 2],
+    ) -> Result<Self, Error> {
+        if (dns4[0].is_none() && dns4[1].is_some())
+            || (dns6[0].is_none() && dns6[1].is_some())
+            || (dns4[0].is_some() && dns4[0] == dns4[1])
+            || (dns6[0].is_some() && dns6[0] == dns6[1])
+        {
+            return Err(Error::InvalidDnsAddress);
+        }
+        for ip in dns4.iter().flatten() {
+            if ip.is_unspecified()
+                || ip.is_loopback()
+                || ip.is_multicast()
+                || ip.is_broadcast()
+                || ip.octets()[0] == 0
+                || ip.octets()[0] >= 240
+            {
+                return Err(Error::InvalidDnsAddress);
+            }
+        }
+        for ip in dns6.iter().flatten() {
+            if ip.is_unspecified()
+                || ip.is_loopback()
+                || ip.is_multicast()
+                || ip.to_ipv4_mapped().is_some()
+            {
+                return Err(Error::InvalidDnsAddress);
+            }
+        }
+        self.dns4 = dns4;
+        self.dns6 = dns6;
+        Ok(self)
+    }
+
     pub fn encode(&self, transaction: u16) -> Result<Vec<u8>, Error> {
-        let mut body = Vec::with_capacity(55);
+        let mut body = Vec::with_capacity(110);
         tlv(&mut body, 1, &self.bssid);
         if let Some(ip) = self.ipv4 {
             // Stock reverses in_addr before the IDL uint32 encoder. IPv4 is a
@@ -99,6 +142,20 @@ impl Connected {
             value[..16].copy_from_slice(&ip.octets());
             value[16] = prefix;
             tlv(&mut body, 0x11, &value);
+        }
+        for (index, ip) in self.dns4.iter().enumerate() {
+            if let Some(ip) = ip {
+                tlv(
+                    &mut body,
+                    0x13 + index as u8,
+                    &u32::from_be_bytes(ip.octets()).to_le_bytes(),
+                );
+            }
+        }
+        for (index, ip) in self.dns6.iter().enumerate() {
+            if let Some(ip) = ip {
+                tlv(&mut body, 0x15 + index as u8, &ip.octets());
+            }
         }
         // Stock STA mode = 2. State 1 means connected but not validated;
         // state 2 means connected and Android-validated. Never manufacture 2.

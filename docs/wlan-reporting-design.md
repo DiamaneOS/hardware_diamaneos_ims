@@ -132,7 +132,7 @@ Before selecting any reporter in a product:
 Selection is explicit through the two opt-in makefiles. The existing DCM broker
 must not be described as implementing this path. The reporter currently binds the
 configured primary/secondary DSD contexts, clears STA status before announcing a
-snapshot, reports the actual Wi-Fi switch state, and requires acknowledgements.
+snapshot, reports the actual Wi-Fi switch state and bounded same-link DNS metadata, and requires acknowledgements.
 It advertises no optional capabilities or fabricated WQE quality. Firmware
 acceptance of the zero-BSSID disconnected startup form is a test-candidate gate;
 a rejection stops that session rather than skipping reconciliation.
