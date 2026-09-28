@@ -3,7 +3,7 @@
  * Copyright 2026 The DiamaneOS Project
  */
 
-package org.diamaneos.imsbroker;
+package de.diamaneos.imsbroker;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;

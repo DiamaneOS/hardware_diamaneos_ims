@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The DiamaneOS Project
-package org.diamaneos.wlanobserver;
+package de.diamaneos.wlanobserver;
 
 import android.app.Application;
 import android.net.ConnectivityManager;
@@ -24,13 +24,13 @@ import android.util.Log;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
-import org.diamaneos.wlan.IReporter;
-import org.diamaneos.wlan.Snapshot;
-import org.diamaneos.wlan.ReporterStatus;
+import de.diamaneos.wlan.IReporter;
+import de.diamaneos.wlan.Snapshot;
+import de.diamaneos.wlan.ReporterStatus;
 
 /** Passive primary-user observations; no exported components, scans or network setters. */
 public final class ObserverApp extends Application {
-    private static final String SERVICE = "org.diamaneos.wlan.IReporter/default";
+    private static final String SERVICE = "de.diamaneos.wlan.IReporter/default";
     private Handler handler;
     private ConnectivityManager connectivity;
     private WifiManager wifi;

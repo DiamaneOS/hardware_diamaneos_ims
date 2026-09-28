@@ -14,7 +14,7 @@ use diamaneos_wlan_reporting::{
     Connected, DSD_SERVICE,
 };
 use diamaneos_wlan_runtime::Observations;
-use org_diamaneos_wlan::aidl::org::diamaneos::wlan::{
+use de_diamaneos_wlan::aidl::org::diamaneos::wlan::{
     IReporter::{BnReporter, IReporter},
     ReporterStatus::ReporterStatus,
     Snapshot::Snapshot,
@@ -29,7 +29,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const SERVICE: &str = "org.diamaneos.wlan.IReporter/default";
+const SERVICE: &str = "de.diamaneos.wlan.IReporter/default";
 static STOP: AtomicBool = AtomicBool::new(false);
 extern "C" fn stop(_: libc::c_int) {
     STOP.store(true, Ordering::Relaxed);

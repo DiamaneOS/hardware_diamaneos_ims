@@ -9,8 +9,8 @@ cargo test --offline --locked
 cargo clippy --offline --all-targets -- -D warnings
 mkdir -p tests/out/broker-core
 "$JAVAC" -Xlint:all -Werror -d tests/out/broker-core \
-    broker/src/org/diamaneos/imsbroker/NetworkState.java \
-    tests/java/org/diamaneos/imsbroker/NetworkStateTest.java
-"$JAVA" -cp tests/out/broker-core org.diamaneos.imsbroker.NetworkStateTest
+    broker/src/de/diamaneos/imsbroker/NetworkState.java \
+    tests/java/de/diamaneos/imsbroker/NetworkStateTest.java
+"$JAVA" -cp tests/out/broker-core de.diamaneos.imsbroker.NetworkStateTest
 
 python3 -m unittest discover -s tests/python -v

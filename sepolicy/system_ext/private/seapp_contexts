@@ -5,4 +5,4 @@
 # application key, the package name, and installation as a privileged app
 # (so a newly installed app never matches; an update must carry the same
 # signature). Its own domain, not priv_app or platform_app.
-user=_app seinfo=diamaneos_ims_broker isPrivApp=true name=org.diamaneos.imsbroker domain=diamaneos_ims_broker_app type=app_data_file levelFrom=all
+user=_app seinfo=diamaneos_ims_broker isPrivApp=true name=de.diamaneos.imsbroker domain=diamaneos_ims_broker_app type=app_data_file levelFrom=all

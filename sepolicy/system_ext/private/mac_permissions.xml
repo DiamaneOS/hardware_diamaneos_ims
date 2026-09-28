@@ -11,7 +11,7 @@
 -->
 <policy>
     <signer signature="@DIAMANEOS_RELEASE">
-        <package name="org.diamaneos.imsbroker">
+        <package name="de.diamaneos.imsbroker">
             <seinfo value="diamaneos_ims_broker" />
         </package>
     </signer>

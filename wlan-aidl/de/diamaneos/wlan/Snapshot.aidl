@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-package org.diamaneos.wlan;
+package de.diamaneos.wlan;
 parcelable Snapshot {
     boolean enabled;
     boolean connected;
