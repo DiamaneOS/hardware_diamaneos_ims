@@ -16,6 +16,7 @@ use diamaneos_wlan_reporting::{
 use diamaneos_wlan_runtime::Observations;
 use org_diamaneos_wlan::aidl::org::diamaneos::wlan::{
     IReporter::{BnReporter, IReporter},
+    ReporterStatus::ReporterStatus,
     Snapshot::Snapshot,
 };
 use std::{
@@ -38,6 +39,7 @@ struct Shared {
     uid: Option<u32>,
     death: Option<DeathRecipient>,
     lifetime: Option<SpIBinder>,
+    status: ReporterStatus,
 }
 struct Service {
     state: Arc<Mutex<Shared>>,
@@ -54,6 +56,16 @@ fn elapsed(origin: Instant) -> u64 {
     origin.elapsed().as_millis().min(u64::MAX as u128) as u64
 }
 impl IReporter for Service {
+    fn getStatus(&self, generation: i64) -> binder::Result<ReporterStatus> {
+        let s = self.state.lock().map_err(|_| denied())?;
+        if generation <= 0
+            || s.uid != Some(ThreadState::get_calling_uid())
+            || !s.observations.is_current(generation as u64)
+        {
+            return Err(denied());
+        }
+        Ok(s.status.clone())
+    }
     fn registerObserver(&self, lifetime: &SpIBinder) -> binder::Result<i64> {
         let uid = ThreadState::get_calling_uid();
         if !(10000..20000).contains(&uid) {
@@ -219,22 +231,7 @@ impl Client {
                     }
                 }
             } else if Some(peer) == self.endpoint {
-                let pending = self.state.pending_message();
                 self.state.receive(&bytes);
-                if let Some(message) = pending {
-                    if self.state.pending_message().is_none() {
-                        eprintln!(
-                            "wlanreportd: subscription {} message {} {}",
-                            self.subscription,
-                            message,
-                            if self.state.failed() {
-                                "rejected"
-                            } else {
-                                "acknowledged"
-                            }
-                        );
-                    }
-                }
             }
         }
         if let Some(peer) = self.endpoint {
@@ -271,6 +268,7 @@ fn run() -> io::Result<()> {
         uid: None,
         death: None,
         lifetime: None,
+        status: ReporterStatus::default(),
     }));
     let service = BnReporter::new_binder(
         Service {
@@ -306,6 +304,28 @@ fn run() -> io::Result<()> {
                 client.step(node, &observation, now)?;
             }
         }
+        let mut s = shared
+            .lock()
+            .map_err(|_| io::Error::other("observer state"))?;
+        for (index, client) in clients.iter().enumerate() {
+            let d = client.state.diagnostics();
+            // An absent endpoint must not look like an active bind transaction.
+            let stage = if client.endpoint.is_none() {
+                -1
+            } else {
+                d.stage
+            };
+            if index == 0 {
+                s.status.primaryStage = stage;
+                s.status.primaryOperation = i32::from(d.operation);
+                s.status.primaryError = d.error;
+            } else {
+                s.status.secondaryStage = stage;
+                s.status.secondaryOperation = i32::from(d.operation);
+                s.status.secondaryError = d.error;
+            }
+        }
+        drop(s);
         std::thread::sleep(Duration::from_millis(250));
     }
     let current = shared

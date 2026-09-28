@@ -91,6 +91,9 @@ fn bounded_retries_and_negative_ack_fail_explicitly() {
     assert_eq!(s.poll(4000).unwrap(), first);
     assert!(s.poll(6000).is_none());
     assert!(s.failed());
+    assert_eq!(s.diagnostics().stage, 6);
+    assert_eq!(s.diagnostics().operation, 0x27);
+    assert_eq!(s.diagnostics().error, -1);
     assert!(s.poll(u64::MAX).is_none());
     let mut s = Session::new(1).unwrap();
     let p = s.poll(0).unwrap();
@@ -99,6 +102,30 @@ fn bounded_retries_and_negative_ack_fail_explicitly() {
     no[12] = 5;
     s.receive(&no);
     assert!(s.failed());
+    assert_eq!(s.diagnostics().error, 5);
+}
+
+#[test]
+fn diagnostics_distinguish_pending_and_acknowledged_status() {
+    let mut s = Session::new(1).unwrap();
+    s.observe(connected());
+    assert_eq!(s.diagnostics().stage, 0);
+    for next_stage in [1, 2, 3, 5] {
+        let p = s.poll(0).unwrap();
+        s.receive(&ack(&p));
+        assert_eq!(s.diagnostics().stage, next_stage);
+    }
+    s.observe(Observation {
+        enabled: false,
+        network: None,
+    });
+    assert_eq!(s.diagnostics().stage, 2);
+    for _ in 0..2 {
+        let p = s.poll(1).unwrap();
+        s.receive(&ack(&p));
+    }
+    assert_eq!(s.diagnostics().stage, 4);
+    assert_eq!(s.diagnostics().error, 0);
 }
 #[test]
 fn new_modem_session_rebinds_and_clears_before_replaying() {

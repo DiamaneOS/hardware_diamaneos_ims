@@ -20,6 +20,8 @@ fn stale_epoch_sequence_and_death_cannot_replace_current_observation() {
     let mut s = Observations::default();
     assert!(s.current(0).is_none());
     let a = s.register().unwrap();
+    assert!(s.is_current(a));
+    assert!(!s.is_current(0));
     assert!(s.update(a, 1, 100, network()));
     assert!(!s.update(a, 1, 101, network()));
     assert!(!s.update(a, 2, 99, network()));
@@ -30,6 +32,7 @@ fn stale_epoch_sequence_and_death_cannot_replace_current_observation() {
     s.lost(a);
     assert!(s.current(104).unwrap().network.is_some());
     s.lost(b);
+    assert!(!s.is_current(b));
     assert!(s.current(104).unwrap().network.is_none());
     assert!(!s.update(b, 2, 105, network()));
 }

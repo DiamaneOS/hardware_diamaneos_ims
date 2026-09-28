@@ -12,6 +12,9 @@ pub struct Observations {
     active: bool,
 }
 impl Observations {
+    pub fn is_current(&self, generation: u64) -> bool {
+        self.active && generation != 0 && generation == self.generation
+    }
     pub fn register(&mut self) -> Option<u64> {
         self.generation = self.generation.checked_add(1)?;
         self.sequence = 0;
