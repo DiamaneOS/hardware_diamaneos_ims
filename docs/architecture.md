@@ -1,11 +1,13 @@
 # Architecture and security boundaries
 
-There are two independently privileged processes in this repository:
+The DCM path and optional Wi-Fi reporting path use separate process identities:
 
 | Component | Privilege | Excluded capabilities |
 | --- | --- | --- |
 | IMS DCM daemon | Vendor UID 2990; QRTR to the configured modem; own Binder service | Internet, SMS, location, arbitrary Binder peers, file writes, capabilities |
-| IMS broker | `CONNECTIVITY_USE_RESTRICTED_NETWORKS`, revocable Network permission for policy accounting | Direct IP/modem sockets, location, SMS |
+| IMS broker | `CONNECTIVITY_USE_RESTRICTED_NETWORKS`, Network permission for policy accounting | Direct IP/modem sockets, location, SMS |
+| Wi-Fi reporter (optional) | UID 2991; configured modem DSD endpoint; private Binder service | Internet, location, SMS, routing changes, capabilities |
+| Wi-Fi observer (optional) | Passive Wi-Fi/network reads; `RADIO_SCAN_WITHOUT_LOCATION` | Internet permission, scans, location, phone-state and network-setting permissions |
 
 The daemon owns all protocol state on one thread. Binder callbacks enqueue bounded
 messages. Session IDs are bounded to 20–98, with capacity reserved for emergency
@@ -29,8 +31,12 @@ are not advertised.
 The Network permission does not by itself grant direct socket access through
 SELinux. These socket restrictions do not prove that every indirect network path
 through permitted Android IPC is impossible; audit both permission and Binder
-boundaries. The proposed [Wi-Fi observer/reporter](wlan-reporting-design.md) must
-use separate identities rather than widening this broker's authority.
+boundaries. The [Wi-Fi observer/reporter](wlan-reporting-design.md) uses separate identities
+and does not widen this broker's authority. The observer obtains same-link BSSID,
+addresses and bounded DNS metadata; the reporter validates and sends the verified
+DSD request subset. Numeric status contains no network identifiers. Effective
+permission flags must be inspected on-device: a manifest declaration alone does
+not prove that a grant is user-revocable.
 
 ## Scope and remaining verification
 

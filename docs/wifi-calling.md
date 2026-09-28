@@ -11,16 +11,21 @@ The FP6 integration candidate uses the stock Qualcomm IWLAN frontend and its
 certificate helper with the QCRIL `IIWlan` service. They share an application UID,
 not the system UID; the device policy confines their Binder and QRTR access.
 Required JNI libraries and carrier data are pinned in the vendor selection.
-No CNE or second DCM publisher is selected.
+No CNE or second DCM publisher is selected. The separate source observer and
+reporter supply acknowledged Wi-Fi state, current link addresses and bounded
+same-link DNS metadata to DSD; they do not negotiate IKE or modify routing.
 
 The alternative [DiamaneOS IWLAN fork](https://github.com/DiamaneOS/platform_packages_services_Iwlan)
-at `packages/services/Iwlan`, paired with AOSP `QualifiedNetworksService` and the
+uses `packages/services/Iwlan`, paired with AOSP `QualifiedNetworksService` and the
 platform IKE/IPsec modules. Its `diamaneos/product.mk` and `diamaneos/board.mk`
 provide opt-in source package, framework binding and domain selection. It is not
 selected for the FP6 candidate. The app has
 its own UID; it retains platform signing for the declared IPsec permission.
 
-Neither path has proven FP6 carrier interoperability yet. Confirm
+The native path has demonstrated basic incoming/outgoing ordinary calling on
+two FP6 subscriptions in Wi-Fi-only mode. That evidence does not establish all
+carriers, roaming, suspend, reconnect or handover behavior. The alternative AOSP
+path remains unqualified for the FP6 modem data path. For each product, confirm
 modem AP-assisted support, required vendor interfaces, selected carrier overrides,
 provisioning, ePDG identity validation, accepted cipher suites, IMS registration,
 voice/SMS, suspend and WWAN/IWLAN handovers. Keep normal and emergency behavior
