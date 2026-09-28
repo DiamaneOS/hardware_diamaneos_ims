@@ -195,7 +195,7 @@ impl Engine {
         }
     }
     pub fn peer_gone(&mut self, peer: Peer) -> Vec<Effect> {
-        if self.sessions.iter().any(|s| s.peer == peer) {
+        if self.sessions.iter().any(|s| s.peer == peer) || self.indications.contains_key(&peer) {
             self.diagnostics.client_losses = self.diagnostics.client_losses.saturating_add(1);
         }
         self.sessions.retain(|s| s.peer != peer);
