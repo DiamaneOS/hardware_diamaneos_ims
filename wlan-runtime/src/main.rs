@@ -64,7 +64,14 @@ impl IReporter for Service {
         {
             return Err(denied());
         }
-        Ok(s.status.clone())
+        Ok(ReporterStatus {
+            primaryStage: s.status.primaryStage,
+            primaryOperation: s.status.primaryOperation,
+            primaryError: s.status.primaryError,
+            secondaryStage: s.status.secondaryStage,
+            secondaryOperation: s.status.secondaryOperation,
+            secondaryError: s.status.secondaryError,
+        })
     }
     fn registerObserver(&self, lifetime: &SpIBinder) -> binder::Result<i64> {
         let uid = ThreadState::get_calling_uid();
