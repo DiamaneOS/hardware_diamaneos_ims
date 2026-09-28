@@ -21,9 +21,11 @@ development phone: 591 tests passed, none failed and five were skipped or subjec
 to assumptions. This does not qualify real emergency calling, carrier location
 delivery or every carrier configuration. No real emergency call was placed.
 
-The `de.diamaneos` namespace migration needs its own platform and device checks;
-the earlier runtime results must not be attributed to a renamed build before it
-is tested.
+The `de.diamaneos` build boots enforcing after the development overlay migration.
+A Connectivity framework fix now propagates IPv6 address-state changes: its four
+regression cases pass on the device and the observer receives usable addresses.
+Wi-Fi-only IMS registration still failed in the subsequent bounded test. The
+framework correction is not acceptance of the remaining native IWLAN path.
 
 `tests/run-host-tests.sh` exercises the production Rust codec/state machine,
 Java network-callback state and emergency-APN merger. It uses no phone, QRTR
@@ -67,17 +69,20 @@ AML message encoding, country profiles, HTTPS/SMS delivery and the AML lab moved
 [platform_packages_apps_EmergencyLocation](https://github.com/DiamaneOS/platform_packages_apps_EmergencyLocation).
 They remain deferred and are not part of this repository's active scope.
 
-## DCM lifecycle diagnostics
+## Operational diagnostics
 
-The WLAN observer logs its numeric observation state only when it changes.
-State 8 means no accepted link address; it also reports the address count and a
-bitmask of rejection categories: tentative 1, DAD failure 2, deprecated 4,
-unspecified 8, loopback 16, link-local 32 and multicast 64. The mask is the union
-across the observed addresses. It contains no address, prefix or lifetime and
-does not change address eligibility. A zero count distinguishes an empty API
-result from filtering. Android can synthesize the deprecated flag from the
-stored address lifetime, so compare API and kernel observations before changing
-eligibility rules.
+Temporary observer state numbers, address counts and rejection masks have been
+removed after diagnosing address propagation. Address eligibility remains strict.
+Broker lifecycle traces and observer reporter-status polling are restricted to
+debuggable builds. Release builds keep operational errors without session, slot,
+caller UID, address-family or MTU details. Exception categories may be logged;
+exception messages and network payloads are not. A failed diagnostic status query
+does not invalidate a successfully delivered Wi-Fi observation.
+
+The authenticated reporter status and the root-only DCM counters below remain
+useful for the unresolved IWLAN lifecycle investigation. They add no modem command
+and do not relax the caller checks or SELinux policy. Test APKs and private
+diagnostic/deployment helpers are not selected by the production product.
 
 The existing Binder dump transaction exposes a fixed snapshot of lifecycle
 counters to UID 0 only. It accepts no arguments and does not issue modem commands.
