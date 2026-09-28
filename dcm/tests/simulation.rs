@@ -417,6 +417,8 @@ fn lifecycle_diagnostics_distinguish_release_stale_report_and_reactivation() {
     let down = engine.diagnostics();
     assert_eq!((down.active_sessions, down.active_groups), (0, 0));
     assert_eq!((down.down_reports, down.stale_reports), (1, 1));
+    engine.peer_gone(MODEM); // A known client can disappear after releasing its last session.
+    assert_eq!(engine.diagnostics().client_losses, 1);
     engine.receive(MODEM, &activate(2, 2, 1, false, 0));
     assert_eq!(engine.diagnostics().sessions_by_slot, [0, 0, 1, 0]);
     assert_eq!(engine.diagnostics().requests, 2);
