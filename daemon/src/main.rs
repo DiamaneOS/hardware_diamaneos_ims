@@ -6,18 +6,19 @@ use binder::{
     Strong, ThreadState,
 };
 use diamaneos_ims_dcm::{
-    engine::{Effect, Engine, Key, Network, Request},
+    engine::{Diagnostics, Effect, Engine, Key, Network, Request},
     protocol::PdnType as Kind,
     qrtr::*,
 };
 use diamaneos_ims_runtime::socket::Qrtr;
 use std::{
+    ffi::CStr,
     io,
     net::{Ipv4Addr, Ipv6Addr},
     sync::{
         atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         mpsc::{sync_channel, SyncSender, TryRecvError},
-        Arc,
+        Arc, Mutex,
     },
     time::Duration,
 };
@@ -45,8 +46,25 @@ struct Service {
     epoch: Arc<AtomicU64>,
     overflow: Arc<AtomicBool>,
     broker_uid: AtomicU32,
+    diagnostics: Arc<Mutex<Diagnostics>>,
 }
-impl Interface for Service {}
+impl Interface for Service {
+    fn dump(&self, writer: &mut dyn io::Write, args: &[&CStr]) -> Result<(), binder::StatusCode> {
+        // Existing Binder dump transaction, no new endpoint or modem operation.
+        if ThreadState::get_calling_uid() != 0 {
+            return Err(binder::StatusCode::PERMISSION_DENIED);
+        }
+        if !args.is_empty() {
+            return Err(binder::StatusCode::BAD_VALUE);
+        }
+        // Never hold the state lock while writing a caller-provided descriptor.
+        let snapshot = *self
+            .diagnostics
+            .lock()
+            .map_err(|_| binder::StatusCode::FAILED_TRANSACTION)?;
+        writeln!(writer, "{snapshot:?}").map_err(|_| binder::StatusCode::FAILED_TRANSACTION)
+    }
+}
 fn denied() -> Status {
     Status::new_exception(ExceptionCode::SECURITY, None)
 }
@@ -175,10 +193,24 @@ fn effects(
     for e in out {
         match e {
             Effect::Send(peer, bytes) => socket.send(peer, &bytes)?,
-            Effect::ReadTime { peer, txn, pdp, sequence } => {
-                let reply = diamaneos_ims_runtime::clock::now().ok()
-                    .and_then(|t| diamaneos_ims_dcm::protocol::timezone_response(
-                        txn, pdp, sequence, t.fields, t.utc_seconds).ok())
+            Effect::ReadTime {
+                peer,
+                txn,
+                pdp,
+                sequence,
+            } => {
+                let reply = diamaneos_ims_runtime::clock::now()
+                    .ok()
+                    .and_then(|t| {
+                        diamaneos_ims_dcm::protocol::timezone_response(
+                            txn,
+                            pdp,
+                            sequence,
+                            t.fields,
+                            t.utc_seconds,
+                        )
+                        .ok()
+                    })
                     .unwrap_or_else(|| diamaneos_ims_dcm::protocol::response(txn, 0x32, 1, 0));
                 socket.send(peer, &reply)?;
             }
@@ -216,12 +248,14 @@ fn run() -> io::Result<()> {
     }
     let (tx, rx) = sync_channel(64);
     let overflow = Arc::new(AtomicBool::new(false));
+    let diagnostics = Arc::new(Mutex::new(engine.diagnostics()));
     let service = BnImsDcm::new_binder(
         Service {
             sender: tx,
             epoch: Arc::new(AtomicU64::new(0)),
             overflow: overflow.clone(),
             broker_uid: AtomicU32::new(0),
+            diagnostics: diagnostics.clone(),
         },
         BinderFeatures::default(),
     );
@@ -269,7 +303,9 @@ fn run() -> io::Result<()> {
             };
             let out = match e {
                 Event::Register(epoch, b, d) => {
-                    if epoch <= latest_registration { continue; }
+                    if epoch <= latest_registration {
+                        continue;
+                    }
                     latest_registration = epoch;
                     if let Some((_, old, _)) = &broker {
                         effects(&socket, Some(old), engine.broker_lost())?;
@@ -313,6 +349,9 @@ fn run() -> io::Result<()> {
             };
             effects(&socket, broker.as_ref().map(|b| &b.1), out)?;
         }
+        *diagnostics
+            .lock()
+            .map_err(|_| io::Error::other("diagnostic state"))? = engine.diagnostics();
     }
     let _ = effects(&socket, broker.as_ref().map(|b| &b.1), engine.shutdown());
     Ok(())

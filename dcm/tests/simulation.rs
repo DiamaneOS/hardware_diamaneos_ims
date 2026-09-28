@@ -399,3 +399,33 @@ fn conflict_watch_ignores_self_and_rejects_competing_publishers() {
     assert!(Control::server(NEW_SERVER, Peer { node: 3, port: 900 }).conflicts_with(local));
     assert!(!Control::server(DEL_SERVER, MODEM).conflicts_with(local));
 }
+
+#[test]
+fn lifecycle_diagnostics_distinguish_release_stale_report_and_reactivation() {
+    let mut engine = connected();
+    let first = engine.receive(MODEM, &activate(1, 1, 0, false, 0));
+    let r = request(&first);
+    engine.report(r, Some(network()));
+    let up = engine.diagnostics();
+    assert!(up.broker_connected);
+    assert_eq!(up.active_sessions, 1);
+    assert_eq!(up.active_groups, 1);
+    assert_eq!(up.sessions_by_slot, [0, 1, 0, 0]);
+    assert_eq!((up.requests, up.up_reports, up.down_reports), (1, 1, 0));
+    engine.report(r, None);
+    engine.report(r, Some(network())); // Late callback must not resurrect the group.
+    let down = engine.diagnostics();
+    assert_eq!((down.active_sessions, down.active_groups), (0, 0));
+    assert_eq!((down.down_reports, down.stale_reports), (1, 1));
+    engine.receive(MODEM, &activate(2, 2, 1, false, 0));
+    assert_eq!(engine.diagnostics().sessions_by_slot, [0, 0, 1, 0]);
+    assert_eq!(engine.diagnostics().requests, 2);
+    assert_eq!(engine.diagnostics().last_request, ACTIVATE);
+    engine.node_gone(MODEM.node);
+    let lost = engine.diagnostics();
+    assert_eq!(lost.modem_losses, 1);
+    assert_eq!(lost.active_sessions, 0);
+    assert_eq!(lost.active_groups, 0);
+    engine.receive(MODEM, &[0]);
+    assert_eq!(engine.diagnostics().malformed, 1);
+}
