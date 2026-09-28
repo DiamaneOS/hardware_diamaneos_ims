@@ -119,3 +119,60 @@ fn responses_do_not_accept_mismatched_or_malformed_success() {
     failure[12] = 0;
     assert_eq!(response(&failure, 7), Err(Error::MalformedResponse));
 }
+
+#[test]
+fn dns_wire_metadata_matches_stock_slots_and_is_absent_on_withdrawal() {
+    let base = Connected::new(BSSID, Some("192.0.2.1".parse().unwrap()), None, true).unwrap();
+    let network = base
+        .clone()
+        .with_dns(
+            [
+                Some("192.0.2.53".parse().unwrap()),
+                Some("198.51.100.53".parse().unwrap()),
+            ],
+            [
+                Some("2001:db8::53".parse().unwrap()),
+                Some("fe80::53".parse().unwrap()),
+            ],
+        )
+        .unwrap();
+    let packet = network.encode(1).unwrap();
+    // Independently specified tags, lengths and address byte order.
+    let expected = [
+        0x13, 4, 0, 53, 2, 0, 192, 0x14, 4, 0, 53, 100, 51, 198, 0x15, 16, 0, 0x20, 1, 0x0d, 0xb8,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x53, 0x16, 16, 0, 0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0x53,
+    ];
+    assert_eq!(&packet[23..75], &expected);
+    assert_eq!(
+        u16::from_le_bytes([packet[5], packet[6]]) as usize,
+        packet.len() - 7
+    );
+    assert_eq!(network.encode_withdrawal(2), base.encode_withdrawal(2));
+}
+
+#[test]
+fn reject_invalid_or_ambiguous_resolver_slots() {
+    let base = Connected::new(BSSID, Some("192.0.2.1".parse().unwrap()), None, true).unwrap();
+    for value in [
+        "0.0.0.0",
+        "127.0.0.1",
+        "224.0.0.1",
+        "255.255.255.255",
+        "240.0.0.1",
+    ] {
+        assert!(base
+            .clone()
+            .with_dns([Some(value.parse().unwrap()), None], [None; 2])
+            .is_err());
+    }
+    for value in ["::", "::1", "ff02::1", "::ffff:192.0.2.53"] {
+        assert!(base
+            .clone()
+            .with_dns([None; 2], [Some(value.parse().unwrap()), None])
+            .is_err());
+    }
+    let ip = Some("192.0.2.53".parse().unwrap());
+    assert!(base.clone().with_dns([None, ip], [None; 2]).is_err());
+    assert!(base.with_dns([ip, ip], [None; 2]).is_err());
+}

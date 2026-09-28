@@ -51,3 +51,29 @@ the codec can check address values but cannot know their real link state.
 
 See [the reporting design](wlan-reporting-design.md) for process isolation,
 permission review, lifecycle requirements and remaining integration gates.
+
+## Same-link DNS metadata
+
+The stock `libwms.so` STA builder identifies IPv4 DNS slots at native offsets
+0x28/0x30 and IPv6 DNS slots at 0x35/0x46. Its diagnostic format strings explicitly
+name DNS addresses 1/2 and DNS V6 addresses 1/2. The authenticated DSD IDL maps
+these to request 0x20 TLVs 0x13/0x14 (uint32 little-endian numeric IPv4) and
+0x15/0x16 (16 IPv6 octets). Stock reverses the IPv4 in_addr before storage;
+IPv6 is copied unchanged. These are resolver addresses, not local interface
+addresses. No fabricated resolver or fallback is used.
+
+The observer supplies at most the first two distinct DNS servers per address
+family from the selected Wi-Fi LinkProperties, preserving order within each
+family. The Binder representation is fixed-size and validates counts; the codec
+rejects unspecified, loopback, multicast, mapped-IPv6 and invalid IPv4 addresses,
+slot gaps and duplicates. Link-local resolvers are valid only in the reported
+Wi-Fi link context. DNS changes replace the desired snapshot and stale pending
+reports are not retried; withdrawal includes no resolver metadata.
+
+This conveys the underlying link's resolver addresses to modem firmware, as the
+stock report does. It does not issue DNS queries, change Android Private DNS or
+VPN settings, or prove that modem-originated DNS follows those policies. That
+modem behavior remains a device qualification item. No SSID, signal measurement,
+optional capability, packet contents or resolver address is added to diagnostics.
+Adding this stock metadata closes an identified omission; it does not by itself
+prove that DNS was the VoWiFi failure's cause.

@@ -111,6 +111,16 @@ public final class ObserverApp extends Application {
                 result.ipv6 = ip.getAddress(); result.ipv6Prefix = link.getPrefixLength(); result.hasIpv6 = true;
             }
         }
+        // Match stock's same-link resolver metadata without performing DNS queries.
+        // Bound each family to the two slots supported by the stock DSD request.
+        for (InetAddress dns : new java.util.LinkedHashSet<>(links.getDnsServers())) {
+            if (dns.isAnyLocalAddress() || dns.isLoopbackAddress() || dns.isMulticastAddress()) continue;
+            if (dns instanceof Inet4Address && result.dns4Count < 2) {
+                System.arraycopy(dns.getAddress(), 0, result.dns4, 4 * result.dns4Count++, 4);
+            } else if (dns instanceof Inet6Address && result.dns6Count < 2) {
+                System.arraycopy(dns.getAddress(), 0, result.dns6, 16 * result.dns6Count++, 16);
+            }
+        }
         WifiInfo after = wifi.getConnectionInfo();
         NetworkCapabilities capsAfter = connectivity.getNetworkCapabilities(selected);
         if (after == null || after.getNetworkId() != info.getNetworkId()
@@ -123,6 +133,7 @@ public final class ObserverApp extends Application {
 
     private static Snapshot disconnected(boolean enabled) {
         Snapshot value = new Snapshot();
+        value.dns4 = new byte[8]; value.dns6 = new byte[32];
         value.enabled = enabled; value.bssid = new byte[6]; value.ipv4 = new byte[4]; value.ipv6 = new byte[16];
         return value;
     }
