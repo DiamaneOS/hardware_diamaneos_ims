@@ -2,9 +2,7 @@
 // Copyright 2026 The DiamaneOS Project
 package org.diamaneos.wlanobserver;
 
-import android.Manifest;
 import android.app.Application;
-import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
 import android.net.LinkAddress;
 import android.net.LinkProperties;
@@ -22,11 +20,13 @@ import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.os.UserManager;
 import android.system.OsConstants;
+import android.util.Log;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import org.diamaneos.wlan.IReporter;
 import org.diamaneos.wlan.Snapshot;
+import org.diamaneos.wlan.ReporterStatus;
 
 /** Passive primary-user observations; no exported components, scans or network setters. */
 public final class ObserverApp extends Application {
@@ -39,6 +39,7 @@ public final class ObserverApp extends Application {
     private IBinder lifetime;
     private long generation;
     private long sequence;
+    private String lastStatus;
     private final Runnable heartbeat = new Runnable() {
         @Override public void run() {
             publish();
@@ -72,8 +73,7 @@ public final class ObserverApp extends Application {
 
     private Snapshot read() {
         Snapshot result = disconnected(wifi.isWifiEnabled());
-        if (!result.enabled || checkSelfPermission(Manifest.permission.INTERNET)
-                != PackageManager.PERMISSION_GRANTED) return result;
+        if (!result.enabled) return result;
         Network selected = null;
         NetworkCapabilities selectedCaps = null;
         // Do not mix identities/addresses from multiple simultaneous Wi-Fi links.
@@ -126,11 +126,24 @@ public final class ObserverApp extends Application {
         value.enabled = enabled; value.bssid = new byte[6]; value.ipv4 = new byte[4]; value.ipv6 = new byte[16];
         return value;
     }
+    private void unavailable(String category) {
+        if (!category.equals(lastStatus)) {
+            Log.w("WlanReporting", category);
+            lastStatus = category;
+        }
+    }
     private void publish() {
+        final Snapshot snapshot;
+        try {
+            snapshot = read();
+        } catch (RuntimeException ignored) {
+            unavailable("Observation read unavailable");
+            return; // No refresh: the existing observation lease will expire.
+        }
         try {
             if (reporter == null) {
                 IBinder found = ServiceManager.checkService(SERVICE);
-                if (found == null) return;
+                if (found == null) { unavailable("Reporter unavailable"); return; }
                 IReporter next = IReporter.Stub.asInterface(found);
                 IBinder token = new Binder();
                 long epoch = next.registerObserver(token);
@@ -138,13 +151,23 @@ public final class ObserverApp extends Application {
                     if (binder == found) { reporter = null; binder = null; lifetime = null; }
                 }), 0);
                 binder = found; reporter = next; lifetime = token; generation = epoch; sequence = 0;
+                lastStatus = null;
             }
             if (sequence == Long.MAX_VALUE) { reporter = null; return; }
-            reporter.observe(generation, ++sequence, read());
+            reporter.observe(generation, ++sequence, snapshot);
+            ReporterStatus status = reporter.getStatus(generation);
+            String summary = "primary=" + status.primaryStage + "/" + status.primaryOperation
+                    + "/" + status.primaryError + " secondary=" + status.secondaryStage
+                    + "/" + status.secondaryOperation + "/" + status.secondaryError;
+            if (!summary.equals(lastStatus)) {
+                Log.i("WlanReporting", summary);
+                lastStatus = summary;
+            }
         } catch (RemoteException | RuntimeException ignored) {
             // No payload/exception logging. Failure cannot refresh the observation
             // lease; the reporter expires it and withdraws availability.
             reporter = null; binder = null; lifetime = null;
+            unavailable("Observer delivery unavailable");
         }
     }
 }

@@ -20,26 +20,32 @@ broker:
 | Android observer | Observe the connected Wi-Fi network and report a bounded snapshot | Modem sockets, IP traffic, route changes, network configuration, SMS, subscription credentials |
 | Rust reporter | Validate snapshots and send a fixed DSD protocol subset to the configured modem | IP sockets, filesystem writes, Android Wi-Fi management, arbitrary QMI requests, DCM service publication |
 
-The observer must not acquire `NETWORK_STACK`, `MAINLINE_NETWORK_STACK`,
-`NETWORK_SETTINGS`, `CHANGE_WIFI_STATE`, GPS location, subscriber identifiers or
-usage statistics to reproduce CNE's broad behavior. The radio-specific
-`RADIO_SCAN_WITHOUT_LOCATION` permission is a candidate for connected-network
-metadata access with location disabled; it requires a separate review of its
-effective permissions on the selected Android revision. It can expose nearby
-network identifiers, so it is not a privacy-neutral permission. Do not claim
-SELinux filters individual methods of the Wi-Fi Binder service.
+Observer:
 
-Use passive network callbacks. Do not initiate scans or obtain historical scan
-results. Inspect only the connected network, never forward a scan list. If the
-platform requires the Network permission for callback delivery, document and
-test it independently of direct socket restrictions. Platform signing authorizes
-only declared permissions; it does not justify a shared UID or broad domain.
+- Must not acquire `NETWORK_STACK`, `MAINLINE_NETWORK_STACK`,
+  `NETWORK_SETTINGS`, `CHANGE_WIFI_STATE`, GPS location, subscriber identifiers
+  or usage statistics to reproduce CNE's broad behavior.
+- Uses the radio-specific `RADIO_SCAN_WITHOUT_LOCATION` permission for
+  connected-network metadata with location off. Review its effective
+  permissions on each Android release. It can expose nearby
+  network identifiers, so it is not privacy-neutral.
+- Do not claim SELinux filters individual methods of the Wi-Fi Binder service.
+- Passive network callbacks only: no scans, no historical scan results. Inspect
+  only the connected network and never forward a scan list.
+- The passive reads/listener need ACCESS_NETWORK_STATE or the Wi-Fi listener
+  permission, not INTERNET. The observer declares no INTERNET permission, and
+  its direct socket restrictions are unchanged.
+- Platform signing authorizes only declared permissions. It does not justify a
+  shared UID or broad domain.
 
-The reporter is a QRTR client, not another IMS DCM publisher. Give it a dedicated
-UID, enforcing SELinux domain and syscall filter. QRTR's service number is not a
-kernel-enforced per-service security boundary: the process remains trusted with
-modem-facing access. Its fixed message allowlist and peer/transaction validation
-are application controls, not a substitute for this limitation.
+Reporter:
+
+- A QRTR client, not another IMS DCM publisher, with a dedicated UID, enforcing
+  SELinux domain and syscall filter.
+- QRTR's service number is not a kernel-enforced per-service security boundary:
+  the process stays trusted with modem-facing access. Its fixed message
+  allowlist and peer/transaction validation are application controls, not a
+  substitute.
 
 ## Observer-to-reporter contract
 
@@ -146,3 +152,22 @@ Each failed session has bounded packet retries and at most three fresh client
 attempts per unchanged observation, with a 30-second delay. Modem restart creates
 fresh QRTR clients and binds again. A new observation permits another bounded
 attempt sequence; it does not bypass the delay or the acknowledgement checks.
+
+
+## Non-sensitive status
+
+The observer queries `getStatus` through its authenticated, generation-bound
+Binder connection. The reporter returns fixed numeric progress for the two modem
+contexts, with no BSSID, IP address, network handle, packet bytes or SIM identity.
+The observer emits only changed status via Android Log. The reporter's socket
+seccomp filter is not widened for logging; init routes its standard error to
+`/dev/null`, so stderr is not evidence of device progress.
+
+Stages are -1 (no endpoint/observation yet), 0 (bind), 1 (startup clear), 2 (switch),
+3 (status), 4 (acknowledged unavailable), 5 (acknowledged available), 6 (failed).
+Operation is the pending or failed message ID. Error0 means no recorded failure,
+positive values are QMI errors, -1 is timeout, -2 transaction exhaustion, and -3
+local encoding failure. Status is sampled asynchronously; it does not establish
+IMS registration or call acceptance. An unavailable diagnostic connection cannot
+renew an observation lease. Both endpoints and their generated interface libraries
+must be updated together as part of the coherent OS build.
