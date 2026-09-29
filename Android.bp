@@ -7,6 +7,12 @@ license {
     license_kinds: ["SPDX-license-identifier-Apache-2.0"],
     license_text: ["LICENSE"],
 }
+java_library {
+    name: "DiamaneOSImsAddressPolicy",
+    srcs: ["common/src/**/*.java"],
+    sdk_version: "current",
+    visibility: [":__subpackages__"],
+}
 rust_library {
     name: "libdiamaneos_ims_dcm", crate_name: "diamaneos_ims_dcm",
     srcs: ["dcm/src/lib.rs"], edition: "2021", vendor_available: true,

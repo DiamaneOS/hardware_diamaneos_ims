@@ -3,7 +3,7 @@ android_app {
     name: "DiamaneOSWlanObserver",
     srcs: ["src/**/*.java"],
     platform_apis: true,
-    static_libs: ["de.diamaneos.wlan-java"],
+    static_libs: ["de.diamaneos.wlan-java", "DiamaneOSImsAddressPolicy"],
     certificate: "platform",
     system_ext_specific: true,
     privileged: true,

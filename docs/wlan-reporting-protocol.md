@@ -49,8 +49,10 @@ measurement requests.
 
 Sensitive observations have no `Debug` or `Display` implementation. Encoded byte
 buffers still contain identifiers; callers must not log or persist them. The
-observer must exclude tentative/deprecated addresses using platform link flags;
-the codec can check address values but cannot know their real link state.
+observer uses the shared Android preferred-address flag rule: reject failed-DAD
+or deprecated addresses, and reject tentative addresses unless also optimistic.
+The codec can check address values but cannot know their real link state. No
+address state is fabricated, and the other address/snapshot checks remain in force.
 
 See [the reporting design](wlan-reporting-design.md) for process isolation,
 permission review, lifecycle requirements and remaining integration gates.

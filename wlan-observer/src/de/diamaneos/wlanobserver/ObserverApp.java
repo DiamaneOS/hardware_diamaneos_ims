@@ -20,11 +20,11 @@ import android.os.IBinder;
 import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.os.UserManager;
-import android.system.OsConstants;
 import android.util.Log;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
+import de.diamaneos.ims.AddressPolicy;
 import de.diamaneos.wlan.IReporter;
 import de.diamaneos.wlan.Snapshot;
 import de.diamaneos.wlan.ReporterStatus;
@@ -103,10 +103,9 @@ public final class ObserverApp extends Application {
         LinkProperties links = connectivity.getLinkProperties(selected);
         if (links == null) return disconnected(result.enabled);
         for (LinkAddress link : links.getLinkAddresses()) {
-            int bad = OsConstants.IFA_F_TENTATIVE | OsConstants.IFA_F_DADFAILED
-                    | OsConstants.IFA_F_DEPRECATED;
             InetAddress ip = link.getAddress();
-            if ((link.getFlags() & bad) != 0 || ip.isAnyLocalAddress() || ip.isLoopbackAddress()
+            if (!AddressPolicy.isPreferred(link.getFlags())
+                    || ip.isAnyLocalAddress() || ip.isLoopbackAddress()
                     || ip.isLinkLocalAddress() || ip.isMulticastAddress()) continue;
             if (ip instanceof Inet4Address && !result.hasIpv4) {
                 result.ipv4 = ip.getAddress(); result.hasIpv4 = true;
