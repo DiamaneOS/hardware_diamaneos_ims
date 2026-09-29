@@ -25,8 +25,10 @@ an arbitrary installed package. Both policy and device isolation need validation
 The broker uses a fresh callback object for each daemon connection. Stale death
 notifications and queued old callbacks cannot affect its successor. Network
 replacement waits for matching capabilities and link properties before reporting. A blocked network is not advertised as usable.
-Tentative, failed-DAD, deprecated, link-local, multicast and unspecified addresses
-are not advertised.
+Both address consumers share Android's preferred-address flag rule: failed-DAD
+and deprecated addresses are rejected; tentative addresses require the optimistic
+flag. Link-local, multicast, loopback and unspecified addresses remain excluded.
+This changes eligibility only, not each consumer's existing address ordering.
 
 The Network permission does not by itself grant direct socket access through
 SELinux. These socket restrictions do not prove that every indirect network path

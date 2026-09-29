@@ -14,6 +14,8 @@ import android.net.NetworkSpecifier;
 import android.net.TelephonyNetworkSpecifier;
 import android.telephony.SubscriptionManager;
 
+import de.diamaneos.ims.AddressPolicy;
+
 import vendor.diamaneos.hardware.imsdcm.PdnInfo;
 import vendor.diamaneos.hardware.imsdcm.PdnRequest;
 import vendor.diamaneos.hardware.imsdcm.PdnType;
@@ -110,11 +112,9 @@ final class PdnTracker extends ConnectivityManager.NetworkCallback {
         }
         List<InetAddress> addresses = new ArrayList<>();
         for (LinkAddress linkAddress : mLinkProperties.getLinkAddresses()) {
-            int unusable =
-                    android.system.OsConstants.IFA_F_TENTATIVE
-                            | android.system.OsConstants.IFA_F_DADFAILED
-                            | android.system.OsConstants.IFA_F_DEPRECATED;
-            if ((linkAddress.getFlags() & unusable) == 0) addresses.add(linkAddress.getAddress());
+            if (AddressPolicy.isPreferred(linkAddress.getFlags())) {
+                addresses.add(linkAddress.getAddress());
+            }
         }
         PdnInfo info = new PdnInfo();
         info.networkHandle = mNetwork.getNetworkHandle();

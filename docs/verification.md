@@ -22,14 +22,20 @@ to assumptions. This does not qualify real emergency calling, carrier location
 delivery or every carrier configuration. No real emergency call was placed.
 
 The `de.diamaneos` build boots enforcing after the development overlay migration.
-A Connectivity framework fix now propagates IPv6 address-state changes: its four
-regression cases pass on the device and the observer receives usable addresses.
-Wi-Fi-only IMS registration still failed in the subsequent bounded test. The
-framework correction is not acceptance of the remaining native IWLAN path.
+A separate Connectivity framework experiment propagated IPv6 address-state changes
+and passed its four device regression cases, but did not restore Wi-Fi-only IMS
+registration. The narrower candidate evaluates Android-compatible address flags
+in the observer and broker with upstream Connectivity. Neither experiment is
+acceptance of the remaining native IWLAN path.
 
 `tests/run-host-tests.sh` exercises the production Rust codec/state machine,
 Java network-callback state and emergency-APN merger. It uses no phone, QRTR
 publication, SMS or external network. Addresses are synthetic documentation values.
+It also tests the shared address predicate across every combination of tentative,
+optimistic, failed-DAD and deprecated flags. Its host-only Android constants fixture
+is excluded from product source lists; platform compilation and device behavior
+are separate checks. Acceptance of optimistic addresses does not by itself prove
+that modem-side IWLAN registration or recovery works.
 
 Covered scenarios include separate SIMs, shared IPv4/IPv6 requests, delayed and
 stale callbacks, modem reset, broker loss, normal-session exhaustion with emergency
