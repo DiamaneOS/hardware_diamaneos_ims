@@ -21,3 +21,9 @@ mkdir -p tests/out/address-policy
 "$JAVA" -cp tests/out/address-policy de.diamaneos.ims.AddressPolicyTest
 
 python3 -m unittest discover -s tests/python -v
+
+mkdir -p tests/out/default-network
+"$JAVAC" -Xlint:all -Werror -d tests/out/default-network \
+    wlan-observer/src/de/diamaneos/wlanobserver/DefaultNetworkState.java \
+    tests/java/de/diamaneos/wlanobserver/DefaultNetworkStateTest.java
+"$JAVA" -cp tests/out/default-network de.diamaneos.wlanobserver.DefaultNetworkStateTest

@@ -42,6 +42,7 @@ public final class ObserverApp extends Application {
     private long generation;
     private long sequence;
     private String lastStatus;
+    private final DefaultNetworkState<Network> defaultState = new DefaultNetworkState<>();
     private final Runnable heartbeat = new Runnable() {
         @Override public void run() {
             publish();
@@ -71,30 +72,23 @@ public final class ObserverApp extends Application {
             }
         }, handler);
         connectivity.registerDefaultNetworkCallback(new ConnectivityManager.NetworkCallback() {
-            @Override public void onAvailable(Network n) { changed(); }
-            @Override public void onLost(Network n) { changed(); }
-            @Override public void onCapabilitiesChanged(Network n, NetworkCapabilities c) { changed(); }
+            @Override public void onAvailable(Network n) { defaultState.available(n); changed(); }
+            @Override public void onLost(Network n) { defaultState.lost(n); changed(); }
+            @Override public void onCapabilitiesChanged(Network n, NetworkCapabilities caps) {
+                boolean wifiOnly = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
+                for (int transport : caps.getTransportTypes()) {
+                    if (transport != NetworkCapabilities.TRANSPORT_WIFI
+                            && transport != NetworkCapabilities.TRANSPORT_VPN) wifiOnly = false;
+                }
+                defaultState.capabilities(n, wifiOnly);
+                changed();
+            }
             private void changed() {
                 handler.removeCallbacks(heartbeat);
                 handler.post(heartbeat);
             }
         }, handler);
         handler.post(heartbeat);
-    }
-
-    private boolean isWifiDefault() {
-        // getActiveNetwork() filters callers without INTERNET. This platform
-        // metadata query requires only our existing ACCESS_NETWORK_STATE and
-        // includes physical defaults/underlays without granting socket access.
-        boolean wifiDefault = false;
-        for (NetworkCapabilities caps : connectivity.getDefaultNetworkCapabilitiesForUser(
-                android.os.UserHandle.myUserId())) {
-            for (int transport : caps.getTransportTypes()) {
-                if (transport == NetworkCapabilities.TRANSPORT_WIFI) wifiDefault = true;
-                else if (transport != NetworkCapabilities.TRANSPORT_VPN) return false;
-            }
-        }
-        return wifiDefault;
     }
 
     private Snapshot read() {
@@ -113,7 +107,7 @@ public final class ObserverApp extends Application {
             selected = network; selectedCaps = caps;
         }
         if (selected == null) return result;
-        boolean defaultBefore = isWifiDefault();
+        boolean defaultBefore = defaultState.usesWifi();
         WifiInfo info = wifi.getConnectionInfo();
         if (info == null || info.getSupplicantState() != SupplicantState.COMPLETED) return result;
         String value = info.getBSSID();
@@ -153,7 +147,7 @@ public final class ObserverApp extends Application {
         if (after == null || after.getNetworkId() != info.getNetworkId()
                 || !value.equals(after.getBSSID()) || capsAfter == null) return disconnected(result.enabled);
         result.connected = result.hasIpv4 || result.hasIpv6;
-        result.defaultRoute = result.connected && defaultBefore && isWifiDefault();
+        result.defaultRoute = result.connected && defaultBefore && defaultState.usesWifi();
         result.validated = selectedCaps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
                 && capsAfter.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
         return result;

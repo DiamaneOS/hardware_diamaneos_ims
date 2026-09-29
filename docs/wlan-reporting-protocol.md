@@ -91,13 +91,15 @@ request offset `0xe5` (presence byte `0xe4`). The IDL maps it to optional TLV
 `0x24`, one byte; the stock sender labels it `is_default_route`. This is separate
 from Android validation and connection-state TLV `0x21`.
 
-The observer queries Android default-network capabilities using its existing
-ACCESS_NETWORK_STATE permission. It reports true only when Wi-Fi appears and
-no other physical transport appears in that default/underlay set, with the
-existing single-connected-Wi-Fi restriction. Mixed transports, missing metadata
+The observer uses default-network callback capabilities with its existing
+ACCESS_NETWORK_STATE permission. Android delivers this metadata separately from
+whether the observer itself is blocked from network access. It reports true only
+for a Wi-Fi default or a VPN with Wi-Fi as its sole physical transport, with the
+existing single-connected-Wi-Fi restriction. Mixed transports, missing capabilities
 and disconnected snapshots produce false. It does not use getActiveNetwork(),
-which can hide the default from callers without INTERNET permission. Default-network callbacks refresh the snapshot; the default is
-checked before and after the other link reads. This does not change routes,
+which can hide the default from callers without INTERNET permission, or hidden
+Connectivity APIs. Replacement defaults clear the old state before new capabilities
+arrive; late capabilities/loss from the old network are ignored. This does not change routes,
 bypass a VPN, or assert successful carrier authentication. Withdrawal explicitly
 sets the flag false. No new permissions, identifiers or WQE reports are added.
 
