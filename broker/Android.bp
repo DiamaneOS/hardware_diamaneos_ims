@@ -20,7 +20,7 @@ android_app {
     name: "DiamaneOSImsBroker",
     srcs: ["src/**/*.java"],
     resource_dirs: ["res"],
-    static_libs: ["vendor.diamaneos.hardware.imsdcm-V1-java"],
+    static_libs: ["vendor.diamaneos.hardware.imsdcm-V1-java", "DiamaneOSImsAddressPolicy"],
     libs: ["framework-connectivity.stubs.module_lib"],
     sdk_version: "module_current",
     system_ext_specific: true,
