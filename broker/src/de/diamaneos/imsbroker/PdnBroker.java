@@ -261,6 +261,14 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
     @Override
     public void onTrackerChanged(PdnTracker tracker) {
         if (mTrackers.get(key(tracker.slot, tracker.type)) != tracker) return;
+        if (DEBUG) {
+            int reason = tracker.readinessReason();
+            if (reason != tracker.lastReadiness) {
+                tracker.lastReadiness = reason;
+                // No identifiers; categories describe only this callback's state.
+                Log.i(TAG, "readiness=" + reason);
+            }
+        }
         PdnInfo info = tracker.currentInfo();
         if (info == null && tracker.isSettling()) {
             // ConnectivityService moved the request to a new network: decide once
