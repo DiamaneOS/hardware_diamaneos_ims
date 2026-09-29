@@ -135,6 +135,7 @@ impl IReporter for Service {
             }
             Some(
                 Connected::new(snapshot.bssid, v4, v6, snapshot.validated)
+                    .map(|network| network.with_default_route(snapshot.defaultRoute))
                     .and_then(|network| network.with_dns(dns4, dns6))
                     .map_err(|_| invalid())?,
             )

@@ -12,15 +12,15 @@ fn fixed_wire_vectors_bind_byte_order_and_withdrawal() {
     assert_eq!(
         network.encode(0x1234).unwrap(),
         vec![
-            0, 0x34, 0x12, 0x20, 0, 30, 0, 1, 6, 0, 2, 0, 0, 0, 0, 1, 0x10, 4, 0, 1, 2, 0, 192,
-            0x1f, 4, 0, 2, 0, 0, 0, 0x21, 4, 0, 2, 0, 0, 0,
+            0, 0x34, 0x12, 0x20, 0, 34, 0, 1, 6, 0, 2, 0, 0, 0, 0, 1, 0x10, 4, 0, 1, 2, 0, 192,
+            0x1f, 4, 0, 2, 0, 0, 0, 0x21, 4, 0, 2, 0, 0, 0, 0x24, 1, 0, 0,
         ]
     );
     assert_eq!(
         network.encode_withdrawal(2).unwrap(),
         vec![
-            0, 2, 0, 0x20, 0, 23, 0, 1, 6, 0, 2, 0, 0, 0, 0, 1, 0x1f, 4, 0, 2, 0, 0, 0, 0x21, 4, 0,
-            0, 0, 0, 0,
+            0, 2, 0, 0x20, 0, 27, 0, 1, 6, 0, 2, 0, 0, 0, 0, 1, 0x1f, 4, 0, 2, 0, 0, 0, 0x21, 4, 0,
+            0, 0, 0, 0, 0x24, 1, 0, 0,
         ]
     );
     assert_eq!(network.encode(0), Err(Error::ZeroTransaction));
@@ -32,10 +32,12 @@ fn ipv6_keeps_octets_prefix_and_unvalidated_state() {
     let ip: Ipv6Addr = "2001:db8::1".parse().unwrap();
     let network = Connected::new(BSSID, None, Some((ip, 64)), false).unwrap();
     let mut expected = vec![
-        0, 1, 0, 0x20, 0, 43, 0, 1, 6, 0, 2, 0, 0, 0, 0, 1, 0x11, 17, 0,
+        0, 1, 0, 0x20, 0, 47, 0, 1, 6, 0, 2, 0, 0, 0, 0, 1, 0x11, 17, 0,
     ];
     expected.extend_from_slice(&ip.octets());
-    expected.extend_from_slice(&[64, 0x1f, 4, 0, 2, 0, 0, 0, 0x21, 4, 0, 1, 0, 0, 0]);
+    expected.extend_from_slice(&[
+        64, 0x1f, 4, 0, 2, 0, 0, 0, 0x21, 4, 0, 1, 0, 0, 0, 0x24, 1, 0, 0,
+    ]);
     assert_eq!(network.encode(1).unwrap(), expected);
 }
 
@@ -175,4 +177,16 @@ fn reject_invalid_or_ambiguous_resolver_slots() {
     let ip = Some("192.0.2.53".parse().unwrap());
     assert!(base.clone().with_dns([None, ip], [None; 2]).is_err());
     assert!(base.with_dns([ip, ip], [None; 2]).is_err());
+}
+
+#[test]
+fn default_route_changes_only_the_observed_boolean_and_withdraws_it() {
+    let base = Connected::new(BSSID, Some("192.0.2.1".parse().unwrap()), None, true).unwrap();
+    let selected = base.clone().with_default_route(true);
+    let off = base.encode(1).unwrap();
+    let on = selected.encode(1).unwrap();
+    assert_eq!(&on[..on.len() - 1], &off[..off.len() - 1]);
+    assert_eq!(&on[on.len() - 4..], &[0x24, 1, 0, 1]);
+    assert_eq!(&off[off.len() - 4..], &[0x24, 1, 0, 0]);
+    assert_eq!(selected.encode_withdrawal(2), base.encode_withdrawal(2));
 }

@@ -35,6 +35,7 @@ pub struct Connected {
     ipv4: Option<Ipv4Addr>,
     ipv6: Option<(Ipv6Addr, u8)>,
     validated: bool,
+    default_route: bool,
     dns4: [Option<Ipv4Addr>; 2],
     dns6: [Option<Ipv6Addr>; 2],
 }
@@ -82,9 +83,17 @@ impl Connected {
             ipv4,
             ipv6,
             validated,
+            default_route: false,
             dns4: [None; 2],
             dns6: [None; 2],
         })
+    }
+
+    /// Whether Android currently selects this Wi-Fi transport as the default,
+    /// including an unambiguous Wi-Fi-backed VPN. This does not alter routing.
+    pub fn with_default_route(mut self, default_route: bool) -> Self {
+        self.default_route = default_route;
+        self
     }
 
     /// Resolvers observed on this same Wi-Fi link. No resolution or fallback.
@@ -165,6 +174,7 @@ impl Connected {
             0x21,
             &(if self.validated { 2_u32 } else { 1_u32 }).to_le_bytes(),
         );
+        tlv(&mut body, 0x24, &[u8::from(self.default_route)]);
         frame(transaction, body)
     }
 
@@ -184,6 +194,7 @@ pub fn withdrawal(transaction: u16, previous_bssid: [u8; 6]) -> Result<Vec<u8>, 
     tlv(&mut body, 1, &previous_bssid);
     tlv(&mut body, 0x1f, &2_u32.to_le_bytes());
     tlv(&mut body, 0x21, &0_u32.to_le_bytes());
+    tlv(&mut body, 0x24, &[0]);
     frame(transaction, body)
 }
 
