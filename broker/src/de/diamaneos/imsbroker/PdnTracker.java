@@ -58,6 +58,9 @@ final class PdnTracker extends ConnectivityManager.NetworkCallback {
     /** True after the network was lost, until it is up again. */
     boolean lost;
 
+    /** Last debug-only readiness category emitted by the broker. */
+    int lastReadiness = -1;
+
     private final Listener mListener;
     private final NetworkState<Network, NetworkCapabilities, LinkProperties> mState =
             new NetworkState<>();
@@ -95,21 +98,23 @@ final class PdnTracker extends ConnectivityManager.NetworkCallback {
      * cellular network with the requested capability and, when the request named one, the same
      * subscription.
      */
+    // Fixed categories only: no network, address, subscription or handle payloads.
+    int readinessReason() {
+        if (mState.network() == null) return 1;
+        NetworkCapabilities caps = mState.capabilities();
+        if (caps == null) return 2;
+        if (mState.links() == null) return 3;
+        if (!mState.usable()) return 4;
+        if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) return 5;
+        if (!caps.hasCapability(capability())) return 6;
+        if (!specifierMatches(caps.getNetworkSpecifier())) return 7;
+        return 0;
+    }
+
     PdnInfo currentInfo() {
+        if (readinessReason() != 0) return null;
         Network mNetwork = mState.network();
-        NetworkCapabilities mCapabilities = mState.capabilities();
         LinkProperties mLinkProperties = mState.links();
-        if (mNetwork == null
-                || mCapabilities == null
-                || mLinkProperties == null
-                || !mState.usable()) {
-            return null;
-        }
-        if (!mCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
-                || !mCapabilities.hasCapability(capability())
-                || !specifierMatches(mCapabilities.getNetworkSpecifier())) {
-            return null;
-        }
         List<InetAddress> addresses = new ArrayList<>();
         for (LinkAddress linkAddress : mLinkProperties.getLinkAddresses()) {
             if (AddressPolicy.isPreferred(linkAddress.getFlags())) {
