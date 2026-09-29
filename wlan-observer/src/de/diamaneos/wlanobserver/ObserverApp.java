@@ -82,20 +82,19 @@ public final class ObserverApp extends Application {
         handler.post(heartbeat);
     }
 
-    private boolean isWifiDefault(Network selected) {
-        Network active = connectivity.getActiveNetwork();
-        if (active == null) return false;
-        if (selected.equals(active)) return true;
-        NetworkCapabilities caps = connectivity.getNetworkCapabilities(active);
-        if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
-                || !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return false;
-        // A VPN may aggregate multiple underlays. Do not attribute a mixed
-        // transport default to the sole connected Wi-Fi link.
-        for (int transport : caps.getTransportTypes()) {
-            if (transport != NetworkCapabilities.TRANSPORT_WIFI
-                    && transport != NetworkCapabilities.TRANSPORT_VPN) return false;
+    private boolean isWifiDefault() {
+        // getActiveNetwork() filters callers without INTERNET. This platform
+        // metadata query requires only our existing ACCESS_NETWORK_STATE and
+        // includes physical defaults/underlays without granting socket access.
+        boolean wifiDefault = false;
+        for (NetworkCapabilities caps : connectivity.getDefaultNetworkCapabilitiesForUser(
+                android.os.UserHandle.myUserId())) {
+            for (int transport : caps.getTransportTypes()) {
+                if (transport == NetworkCapabilities.TRANSPORT_WIFI) wifiDefault = true;
+                else if (transport != NetworkCapabilities.TRANSPORT_VPN) return false;
+            }
         }
-        return true;
+        return wifiDefault;
     }
 
     private Snapshot read() {
@@ -114,7 +113,7 @@ public final class ObserverApp extends Application {
             selected = network; selectedCaps = caps;
         }
         if (selected == null) return result;
-        boolean defaultBefore = isWifiDefault(selected);
+        boolean defaultBefore = isWifiDefault();
         WifiInfo info = wifi.getConnectionInfo();
         if (info == null || info.getSupplicantState() != SupplicantState.COMPLETED) return result;
         String value = info.getBSSID();
@@ -154,7 +153,7 @@ public final class ObserverApp extends Application {
         if (after == null || after.getNetworkId() != info.getNetworkId()
                 || !value.equals(after.getBSSID()) || capsAfter == null) return disconnected(result.enabled);
         result.connected = result.hasIpv4 || result.hasIpv6;
-        result.defaultRoute = result.connected && defaultBefore && isWifiDefault(selected);
+        result.defaultRoute = result.connected && defaultBefore && isWifiDefault();
         result.validated = selectedCaps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
                 && capsAfter.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
         return result;
