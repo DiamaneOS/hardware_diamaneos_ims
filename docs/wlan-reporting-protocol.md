@@ -22,6 +22,7 @@ format is described by [Qualcomm's QMI framework](https://github.com/qualcomm/qm
 | TLVs `0x15`, `0x16` | Optional first/second IPv6 DNS server as 16 octets |
 | TLV `0x1f` | Optional uint32 Wi-Fi mode; observed STA value 2 |
 | TLV `0x21` | Optional uint32 connection state; 0 disconnected, 1 not validated, 2 validated |
+| TLV `0x24` | Optional one-byte default-route boolean from Android default-network selection |
 | Response | Result-only TLV `0x02`, uint16 result and error |
 
 The stock request has other optional fields. This codec intentionally has no API
@@ -82,3 +83,24 @@ modem behavior remains a device qualification item. No SSID, signal measurement,
 optional capability, packet contents or resolver address is added to diagnostics.
 Adding this stock metadata closes an identified omission; it does not by itself
 prove that DNS was the VoWiFi failure's cause.
+
+## Default-route metadata
+
+The authenticated stock STA builder copies its default-route boolean to native
+request offset `0xe5` (presence byte `0xe4`). The IDL maps it to optional TLV
+`0x24`, one byte; the stock sender labels it `is_default_route`. This is separate
+from Android validation and connection-state TLV `0x21`.
+
+The observer reports true only when its sole selected Wi-Fi link is the active
+network, or the active VPN exposes Wi-Fi as its sole underlying transport. Mixed
+VPN transports, missing default-network information and disconnected snapshots
+produce false. Default-network callbacks refresh the snapshot; the default is
+checked before and after the other link reads. This does not change routes,
+bypass a VPN, or assert successful carrier authentication. Withdrawal explicitly
+sets the flag false. No new permissions, identifiers or WQE reports are added.
+
+The stock relay uses the default-network callback and transport capabilities to
+recognise Wi-Fi underneath a VPN. The downstream rule is conservative for mixed
+underlays and retains the existing single-Wi-Fi-link restriction. Stock startup
+also considers this flag in a separate WQE message; that message is not implemented
+here. Whether supplying the omitted flag fixes FP6 reconnects requires device tests.

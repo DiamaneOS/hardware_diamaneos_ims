@@ -45,7 +45,7 @@ fn bind_clear_and_ack_before_announcing_available() {
     a.receive(&ack(&pa));
     b.receive(&ack(&pb));
     let clear = a.poll(0).unwrap();
-    assert_eq!(&clear[clear.len() - 4..], &[0, 0, 0, 0]);
+    assert_eq!(&clear[clear.len() - 8..clear.len() - 4], &[0, 0, 0, 0]);
     assert!(a.poll(1).is_none());
     a.receive(&ack(&clear));
     for id in [0x34, 0x20] {
@@ -78,7 +78,7 @@ fn disconnect_during_pending_up_does_not_retry_stale_up() {
     s.receive(&ack(&replacement));
     let down = s.poll(2002).unwrap();
     assert_eq!(down[3], 0x20);
-    assert_eq!(&down[down.len() - 4..], &[0, 0, 0, 0]);
+    assert_eq!(&down[down.len() - 8..down.len() - 4], &[0, 0, 0, 0]);
 }
 #[test]
 fn bounded_retries_and_negative_ack_fail_explicitly() {
@@ -172,4 +172,23 @@ fn resolver_change_replaces_pending_status_and_is_acknowledged() {
     let status = s.poll(2003).unwrap();
     s.receive(&ack(&status));
     assert!(s.settled());
+}
+
+#[test]
+fn default_route_change_is_reported_without_changing_link_identity() {
+    let mut s = Session::new(1).unwrap();
+    let mut observation = connected();
+    s.observe(observation.clone());
+    ready(&mut s);
+    observation.network = observation.network.map(|n| n.with_default_route(true));
+    s.observe(observation.clone());
+    assert!(!s.settled());
+    let switch = s.poll(1).unwrap();
+    s.receive(&ack(&switch));
+    let update = s.poll(2).unwrap();
+    assert_eq!(&update[update.len() - 4..], &[0x24, 1, 0, 1]);
+    s.receive(&ack(&update));
+    assert!(s.settled());
+    s.observe(observation);
+    assert!(s.poll(3).is_none());
 }
