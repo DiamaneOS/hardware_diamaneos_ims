@@ -4,6 +4,7 @@ parcelable Snapshot {
     boolean enabled;
     boolean connected;
     boolean validated;
+    boolean defaultRoute;
     byte[6] bssid;
     boolean hasIpv4;
     byte[4] ipv4;
