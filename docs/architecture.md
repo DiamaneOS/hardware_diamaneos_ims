@@ -46,9 +46,10 @@ The existing Android IMS service, modem firmware and carrier stack retain call
 routing, voice/SMS and carrier emergency-location responsibilities. This component
 supplies normal/emergency data connections; it is not an AML delivery service.
 
-The deferred AML app and its framework event patch are maintained separately in
-[platform_packages_apps_EmergencyLocation](https://github.com/DiamaneOS/platform_packages_apps_EmergencyLocation).
-Neither the daemon nor broker requires that repository or its permissions.
+AML is not part of DiamaneOS. The AML app and its framework event patch are in
+[platform_packages_apps_EmergencyLocation](https://github.com/DiamaneOS/platform_packages_apps_EmergencyLocation),
+outside the build. Neither the daemon nor broker requires that repository or its
+permissions.
 
 Full Soong/link, enforcing policy, native syscall-filter execution and modem/carrier
 behavior remain unqualified by host tests. Simulated emergency scenarios verify
