@@ -42,17 +42,17 @@ stale callbacks, modem reset, broker loss, normal-session exhaustion with emerge
 capacity retained, invalid peers, missing IP families, malformed frames, duplicate
 TLVs, instance destruction, timezone encoding, competing publishers, blocked
 networks and network replacement. The APN tests preserve the supplied input and
-check idempotence. These tests are independent of the deferred AML repository.
+check idempotence. These tests are independent of the AML repository.
 
 Additional development checks include Java compilation against Android 17 SDK
 modules, AIDL dump comparison, Linux host tests and arm64 Rust metadata compilation.
 They are not full Soong/linker, SELinux or native syscall-filter verification.
 
-The current verification plan separates ordinary peer-phone VoLTE/VoWiFi tests
+Verification separates ordinary peer-phone VoLTE/VoWiFi tests
 from simulated emergency scenarios. Simulation can check code paths and modeled
 failures; it cannot confirm that a real emergency call reaches a responder or that
-a carrier delivers location. Preserve that evidence distinction without requiring
-unplanned live emergency calls to run this suite.
+a carrier delivers location. Preserve that evidence distinction; this suite never
+needs a live emergency call.
 
 After a platform build is authorized, `sh tests/run-platform-tests.sh emulator-SERIAL`
 selects the existing Android mock suites for emergency state/number handling,
@@ -71,9 +71,9 @@ Presence is a prerequisite, not functional
 acceptance. Native process recovery, permissions, actual modem/IMS interoperability,
 call audio, subscription switching, roaming and network loss need device evidence.
 
-AML message encoding, country profiles, HTTPS/SMS delivery and the AML lab moved to
-[platform_packages_apps_EmergencyLocation](https://github.com/DiamaneOS/platform_packages_apps_EmergencyLocation).
-They remain deferred and are not part of this repository's active scope.
+AML message encoding, country profiles, HTTPS/SMS delivery and the AML lab are in
+[platform_packages_apps_EmergencyLocation](https://github.com/DiamaneOS/platform_packages_apps_EmergencyLocation);
+AML is not part of DiamaneOS.
 
 ## Operational diagnostics
 

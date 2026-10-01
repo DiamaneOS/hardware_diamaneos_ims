@@ -28,9 +28,9 @@ because its host tests pass.
    other integrations; review duplicate precedence and mixed-use rows before
    adopting its output. It never installs or overwrites inputs.
 
-The deferred AML app and framework event patch live in
-[platform_packages_apps_EmergencyLocation](https://github.com/DiamaneOS/platform_packages_apps_EmergencyLocation).
-Do not include them as prerequisites of IMS. Wi-Fi calling uses the separate
+The AML app and framework event patch in
+[platform_packages_apps_EmergencyLocation](https://github.com/DiamaneOS/platform_packages_apps_EmergencyLocation)
+are not part of DiamaneOS. Do not include them as prerequisites of IMS. Wi-Fi calling uses the separate
 [IWLAN integration](wifi-calling.md).
 
 Full image gates include VINTF, UID collision checks, ELF dependencies, enforcing
@@ -38,5 +38,5 @@ SELinux, and a native seccomp smoke test. Normal carrier tests must cover both
 SIMs, incoming/outgoing voice, mobile data disabled, non-default data SIM,
 re-registration, IMS service restart, and call audio. Emergency radio fallback,
 no-SIM routing, PSAP callback, RTT and carrier emergency-location behavior cannot be established
-by host simulation alone. Record simulated results separately from any future
+by host simulation alone. Record simulated results separately from
 carrier/device observations. AML qualification is outside this repository.
