@@ -139,6 +139,10 @@ fn missing_requested_family_never_reports_success() {
     let out = e.report(request(&a), Some(n));
     assert!(out.iter().any(|x|matches!(x,Effect::Send(_,b) if Frame::parse(b).unwrap().tlv(2)==Some([0,0,13,0].as_slice()))));
     assert_eq!(e.session_count(), 0);
+    let diagnostics = e.diagnostics();
+    assert_eq!(diagnostics.missing_family_releases_by_slot, [0, 1, 0, 0]);
+    assert_eq!(diagnostics.modem_releases_by_slot, [0; 4]);
+    assert_eq!(diagnostics.down_reports, 0);
 }
 #[test]
 fn stale_callback_cannot_revive_released_session() {
@@ -148,6 +152,10 @@ fn stale_callback_cannot_revive_released_session() {
     let b = e.receive(MODEM, &activate(2, 1, 0, false, 0));
     assert_ne!(request(&a).serial, request(&b).serial);
     assert!(e.report(request(&a), Some(network())).is_empty());
+    let diagnostics = e.diagnostics();
+    assert_eq!(diagnostics.modem_releases_by_slot, [0, 1, 0, 0]);
+    assert_eq!(diagnostics.activation_requests_by_slot, [0, 2, 0, 0]);
+    assert_eq!(diagnostics.missing_family_releases_by_slot, [0; 4]);
 }
 #[test]
 fn dual_sim_separate_networks() {
@@ -156,6 +164,7 @@ fn dual_sim_separate_networks() {
     let b = e.receive(MODEM, &activate(2, 2, 0, false, 0));
     assert_ne!(request(&a).key, request(&b).key);
     assert_eq!(e.report(request(&a), Some(network())).len(), 1);
+    assert_eq!(e.diagnostics().activation_requests_by_slot, [0, 1, 1, 0]);
 }
 #[test]
 fn duplicate_activation_does_not_leak_or_refile() {
@@ -165,6 +174,7 @@ fn duplicate_activation_does_not_leak_or_refile() {
     assert_eq!(pdp(&a), pdp(&b));
     assert_eq!(b.len(), 1);
     assert_eq!(e.session_count(), 1);
+    assert_eq!(e.diagnostics().activation_requests_by_slot, [0, 2, 0, 0]);
 }
 #[test]
 fn modem_reset_releases_every_network() {
@@ -183,6 +193,9 @@ fn unknown_peer_cannot_allocate_or_release() {
     let a = e.receive(MODEM, &activate(1, 1, 0, false, 0));
     e.receive(local, &deactivate(pdp(&a)));
     assert_eq!(e.session_count(), 1);
+    let diagnostics = e.diagnostics();
+    assert_eq!(diagnostics.activation_requests_by_slot, [0, 1, 0, 0]);
+    assert_eq!(diagnostics.modem_releases_by_slot, [0; 4]);
 }
 #[test]
 fn reserve_for_emergency_after_normal_exhaustion() {
@@ -417,6 +430,8 @@ fn lifecycle_diagnostics_distinguish_release_stale_report_and_reactivation() {
     let down = engine.diagnostics();
     assert_eq!((down.active_sessions, down.active_groups), (0, 0));
     assert_eq!((down.down_reports, down.stale_reports), (1, 1));
+    assert_eq!(down.modem_releases_by_slot, [0; 4]);
+    assert_eq!(down.missing_family_releases_by_slot, [0; 4]);
     engine.peer_gone(MODEM); // A known client can disappear after releasing its last session.
     assert_eq!(engine.diagnostics().client_losses, 1);
     engine.receive(MODEM, &activate(2, 2, 1, false, 0));
