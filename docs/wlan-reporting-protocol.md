@@ -59,6 +59,13 @@ matching acknowledgement; a rejected profile stops the session, and an obsolete
 transaction cannot settle a replacement observation. Both subscription bindings
 remain independent. Native radio/Wi-Fi recovery qualification remains necessary.
 
+Administrative switch notifications are sent for actual adapter state changes
+or fresh/uncertain context reconciliation. DNS, address, validation, route and
+connection changes still report STA/profile state, without repeating an already
+acknowledged switch value. Starting a switch command invalidates its cached
+acknowledgement: superseding an unacknowledged command must reconcile the modem,
+even if the requested value equals the earlier acknowledged value.
+
 Sensitive observations have no `Debug` or `Display` implementation. Encoded byte
 buffers still contain identifiers; callers must not log or persist them. The
 observer uses the shared Android preferred-address flag rule: reject failed-DAD

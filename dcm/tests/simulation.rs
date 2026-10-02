@@ -314,13 +314,22 @@ fn instance_destroy_is_client_scoped_and_releases_the_broker() {
     assert_eq!(e.session_count(), 1);
     assert!(out.iter().any(|e| matches!(e, Effect::Release(_))));
     let diagnostics = e.diagnostics();
-    assert_eq!(diagnostics.modem_instance_destructions_by_slot, [0, 1, 0, 0]);
+    assert_eq!(
+        diagnostics.modem_instance_destructions_by_slot,
+        [0, 1, 0, 0]
+    );
     assert_eq!(diagnostics.modem_releases_by_slot, [0; 4]);
     assert_eq!(diagnostics.missing_family_releases_by_slot, [0; 4]);
     e.receive(MODEM, &packet); // A duplicate must not count nonexistent removals.
-    assert_eq!(e.diagnostics().modem_instance_destructions_by_slot, [0, 1, 0, 0]);
+    assert_eq!(
+        e.diagnostics().modem_instance_destructions_by_slot,
+        [0, 1, 0, 0]
+    );
     e.receive(other, &packet);
-    assert_eq!(e.diagnostics().modem_instance_destructions_by_slot, [0, 1, 1, 0]);
+    assert_eq!(
+        e.diagnostics().modem_instance_destructions_by_slot,
+        [0, 1, 1, 0]
+    );
     assert_eq!(e.session_count(), 0);
 }
 #[test]
