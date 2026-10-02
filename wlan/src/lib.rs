@@ -12,6 +12,7 @@ pub const DSD_MAJOR_VERSION: u32 = 1;
 pub const WLAN_STATUS: u16 = 0x20;
 pub const BIND_SUBSCRIPTION: u16 = 0x27;
 pub const DATA_SETTINGS: u16 = 0x34;
+pub const DEFAULT_PROFILE_STATUS: u16 = 0x43;
 
 pub mod session;
 
@@ -215,6 +216,20 @@ pub fn wifi_switch(transaction: u16, enabled: bool) -> Result<Vec<u8>, Error> {
     request(transaction, DATA_SETTINGS, body)
 }
 
+/// Stock's default connectivity profile only; not a signal/throughput measurement
+/// and never a caller-selected profile. IDL: required uint32 profile, optional
+/// uint32 status (0 met, 1 not met). The stock default profile is always ID 0.
+pub fn default_profile_status(transaction: u16, connected_default: bool) -> Result<Vec<u8>, Error> {
+    let mut body = Vec::with_capacity(14);
+    tlv(&mut body, 1, &0_u32.to_le_bytes());
+    tlv(
+        &mut body,
+        0x10,
+        &u32::from(!connected_default).to_le_bytes(),
+    );
+    request(transaction, DEFAULT_PROFILE_STATUS, body)
+}
+
 fn tlv(body: &mut Vec<u8>, tag: u8, value: &[u8]) {
     // All callers are private and provide fixed-size values of at most 17 bytes.
     body.push(tag);
@@ -256,8 +271,10 @@ pub fn response_for(bytes: &[u8], expected_transaction: u16, message: u16) -> Re
         return Err(Error::MalformedResponse);
     }
     let parsed = Frame::parse(bytes).map_err(|_| Error::MalformedResponse)?;
-    if !matches!(message, WLAN_STATUS | BIND_SUBSCRIPTION | DATA_SETTINGS)
-        || parsed.kind != Kind::Response
+    if !matches!(
+        message,
+        WLAN_STATUS | BIND_SUBSCRIPTION | DATA_SETTINGS | DEFAULT_PROFILE_STATUS
+    ) || parsed.kind != Kind::Response
         || parsed.id != message
     {
         return Err(Error::MalformedResponse);

@@ -131,28 +131,42 @@ behavior.
    native structure size or an adjacent message ID is not a wire specification.
 2. Test the codec and lifecycle with malformed frames, spoofed peers, late
    responses, lost acknowledgements, observer death and modem restart.
-3. Build the real Binder, UID, SELinux and seccomp integration with neverallows;
-   inspect effective permissions rather than relying on manifest declarations.
-4. Test with the native Qualcomm IWLAN path selected exclusively. Preserve a
-   known working cellular baseline and verify cellular recovery after each test.
+3. Build the real Binder, UID, SELinux and seccomp integration with
+   neverallows. Inspect effective permissions instead of trusting manifest
+   declarations.
+4. Test with the native Qualcomm IWLAN path selected exclusively. Keep a known
+   working cellular baseline and verify cellular recovery after each test.
 
-Selection is explicit through the two opt-in makefiles. The existing DCM broker
-must not be described as implementing this path. The reporter currently binds the
-configured primary/secondary DSD contexts, clears STA status before announcing a
-snapshot, reports the actual Wi-Fi switch state and bounded same-link DNS metadata, and requires acknowledgements.
-It advertises no optional capabilities or fabricated WQE quality. The tested firmware acknowledges the zero-BSSID disconnected startup form;
-a rejection on any firmware stops that session rather than skipping reconciliation.
+Selection is explicit, through the two opt-in makefiles. Do not describe the
+DCM broker as implementing this path.
 
-The observer handles one unambiguous connected Internet-capable Wi-Fi network.
-It withdraws on ambiguous multi-STA observations, loss, revocation or expiry.
-Multi-STA support is not claimed. SIM identity remains modem-owned: the observer
-has no phone-state permission; the reporter binds only the configured modem
-subscription contexts and qualifies removal/reassignment behavior on-device.
-Each failed session has bounded packet retries and at most three fresh client
-attempts per unchanged observation, with a 30-second delay. Modem restart creates
-fresh QRTR clients and binds again. A new observation permits another bounded
-attempt sequence; it does not bypass the delay or the acknowledgement checks.
+## Behavior
 
+Reporter:
+
+- Binds the configured primary/secondary DSD contexts and clears STA status
+  before announcing a snapshot.
+- Reports the actual Wi-Fi switch state and bounded same-link DNS metadata, and
+  requires acknowledgements.
+- Reports only the stock default connectivity profile, from observed
+  connection, validation and default-route state. Advertises no optional
+  measurement capabilities and supplies no signal/throughput estimates.
+- The tested firmware acknowledges the zero-BSSID disconnected startup form. A
+  rejection on any firmware stops that session rather than skipping
+  reconciliation.
+- Failed sessions get bounded packet retries and limited renewals (see
+  [scheduling](#scheduling-and-containment-limits)). Modem restart creates
+  fresh QRTR clients that bind again. A new observation permits another bounded
+  attempt sequence. It does not bypass the delay or the acknowledgement checks.
+
+Observer:
+
+- Handles one unambiguous connected Internet-capable Wi-Fi network. Withdraws on
+  ambiguous multi-STA observations, loss, revocation or expiry. Multi-STA is
+  not supported.
+- SIM identity stays modem-owned: the observer has no phone-state permission.
+  The reporter binds only the configured modem subscription contexts. Removal
+  and reassignment need device tests.
 
 ## Non-sensitive status
 
@@ -166,7 +180,8 @@ seccomp filter is not widened for logging; init routes its standard error to
 `/dev/null`, so stderr is not evidence of device progress.
 
 Stages are -1 (no endpoint/observation yet), 0 (bind), 1 (startup clear), 2 (switch),
-3 (status), 4 (acknowledged unavailable), 5 (acknowledged available), 6 (failed).
+3 (STA status), 4 (acknowledged unavailable), 5 (acknowledged available), 6 (failed),
+and 7 (default connectivity profile). Settled states require both acknowledgements.
 Operation is the pending or failed message ID. Error0 means no recorded failure,
 positive values are QMI errors, -1 is timeout, -2 transaction exhaustion, and -3
 local encoding failure. Status is sampled asynchronously; it does not establish
