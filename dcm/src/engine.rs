@@ -84,6 +84,10 @@ pub struct Diagnostics {
     pub active_sessions: usize,
     pub active_groups: usize,
     pub sessions_by_slot: [usize; 4], // unspecified, then slots 0..2
+    // Same slot indexing; counts only, never session or peer identifiers.
+    pub activation_requests_by_slot: [u64; 4],
+    pub modem_releases_by_slot: [u64; 4],
+    pub missing_family_releases_by_slot: [u64; 4],
     pub requests: u64,
     pub malformed: u64,
     pub last_request: u16,
@@ -292,6 +296,9 @@ impl Engine {
             if address.is_some() {
                 self.sessions[i].address = address;
             } else {
+                let slot = (a.slot + 1) as usize;
+                self.diagnostics.missing_family_releases_by_slot[slot] =
+                    self.diagnostics.missing_family_releases_by_slot[slot].saturating_add(1);
                 self.sessions.remove(i);
             }
         }
@@ -376,6 +383,9 @@ impl Engine {
                 )]
             }
         };
+        let slot = (a.slot + 1) as usize;
+        self.diagnostics.activation_requests_by_slot[slot] =
+            self.diagnostics.activation_requests_by_slot[slot].saturating_add(1);
         if a.pdn_type == PdnType::Emergency && !self.emergency_enabled {
             return vec![Effect::Send(peer, p::response(f.txn, f.id, 1, 0))];
         }
@@ -472,6 +482,9 @@ impl Engine {
         }
         let mut out = vec![Effect::Send(peer, e.finish())];
         if let Some(i) = found {
+            let slot = (self.sessions[i].activation.slot + 1) as usize;
+            self.diagnostics.modem_releases_by_slot[slot] =
+                self.diagnostics.modem_releases_by_slot[slot].saturating_add(1);
             self.sessions.remove(i);
             out.extend(self.release_unused());
         }
