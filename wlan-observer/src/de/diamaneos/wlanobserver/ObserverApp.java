@@ -191,7 +191,11 @@ public final class ObserverApp extends Application {
             if (DEBUG) {
                 try {
                     ReporterStatus status = reporter.getStatus(generation);
-                    String summary = "primary=" + status.primaryStage + "/" + status.primaryOperation
+                    // Numeric connectivity facts only; no link or SIM identifiers.
+                    int flags = (snapshot.enabled ? 1 : 0) | (snapshot.connected ? 2 : 0)
+                            | (snapshot.validated ? 4 : 0) | (snapshot.defaultRoute ? 8 : 0);
+                    String summary = "observation=" + flags + " primary=" + status.primaryStage
+                            + "/" + status.primaryOperation
                             + "/" + status.primaryError + " secondary=" + status.secondaryStage
                             + "/" + status.secondaryOperation + "/" + status.secondaryError;
                     if (!summary.equals(lastStatus)) {

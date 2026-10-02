@@ -1,5 +1,11 @@
 # Verification and limits
 
+Debuggable builds include a numeric `observation` mask in the deduplicated WLAN
+status log: bit0 adapter enabled, bit1 connected, bit2 Android validated, bit3
+Wi-Fi default route. It describes the just-delivered observer snapshot, not a
+modem acknowledgement or carrier registration. No network/SIM identity, address,
+packet or signal-quality measurement is logged; release builds omit this status.
+
 ## FP6 development status
 
 Before the package namespace migration, the enforcing FP6 candidate demonstrated
