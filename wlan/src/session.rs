@@ -197,7 +197,7 @@ impl Session {
             match self.step {
                 Step::Switch => {
                     self.sending = Some(self.desired.clone());
-                    self.step = Step::Status;
+                    self.step = Step::Profile;
                     return self.poll(now_ms);
                 }
                 Step::WithdrawSwitch => {
@@ -237,7 +237,7 @@ impl Session {
                 (DATA_SETTINGS, wifi_switch(tx, self.desired.enabled))
             }
             Step::Status => {
-                // A disconnect arriving during switch acknowledgement takes
+                // Loss or replacement while acknowledging the profile takes
                 // precedence over the old connected snapshot.
                 if self.sending.as_ref() != Some(&self.desired) {
                     self.step = self.update_start();
@@ -251,7 +251,7 @@ impl Session {
             }
             Step::Profile => {
                 // A lost/replaced observation must never gain a stale positive
-                // default-profile update, even after STA acknowledgement.
+                // default-profile update before station reporting.
                 if self.sending.as_ref() != Some(&self.desired) {
                     self.step = self.update_start();
                     return self.poll(now_ms);
@@ -309,9 +309,12 @@ impl Session {
             Step::Bind => Step::Clear,
             Step::Clear => Step::ClearProfile,
             Step::ClearProfile => self.update_start(),
-            Step::Switch => Step::Status,
-            Step::Status => Step::Profile,
-            Step::Profile | Step::WithdrawSwitch => self.settle_update(),
+            // Stock's runtime callback reports the current default profile
+            // before STA on both positive and negative paths. Availability is
+            // still confirmed only after the final station acknowledgement.
+            Step::Switch => Step::Profile,
+            Step::Profile => Step::Status,
+            Step::Status | Step::WithdrawSwitch => self.settle_update(),
             Step::WithdrawProfile => Step::WithdrawStatus,
             Step::WithdrawStatus => Step::WithdrawSwitch,
             _ => Step::Failed,
