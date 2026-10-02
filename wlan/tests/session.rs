@@ -23,7 +23,7 @@ fn ack(request: &[u8]) -> [u8; 14] {
     ]
 }
 fn ready(s: &mut Session) {
-    for id in [0x27, 0x20, 0x43, 0x34, 0x20, 0x43] {
+    for id in [0x27, 0x20, 0x43, 0x34, 0x43, 0x20] {
         let p = s.poll(0).unwrap();
         assert_eq!(p[3], id);
         s.receive(&ack(&p));
@@ -48,7 +48,7 @@ fn bind_clear_and_ack_before_announcing_available() {
     assert_eq!(&clear[clear.len() - 8..clear.len() - 4], &[0, 0, 0, 0]);
     assert!(a.poll(1).is_none());
     a.receive(&ack(&clear));
-    for id in [0x43, 0x34, 0x20, 0x43] {
+    for id in [0x43, 0x34, 0x43, 0x20] {
         let p = a.poll(2).unwrap();
         assert_eq!(p[3], id);
         a.receive(&ack(&p));
@@ -111,7 +111,7 @@ fn diagnostics_distinguish_pending_and_acknowledged_status() {
     let mut s = Session::new(1).unwrap();
     s.observe(connected());
     assert_eq!(s.diagnostics().stage, 0);
-    for next_stage in [1, 7, 2, 3, 7, 5] {
+    for next_stage in [1, 7, 2, 7, 3, 5] {
         let p = s.poll(0).unwrap();
         s.receive(&ack(&p));
         assert_eq!(s.diagnostics().stage, next_stage);
@@ -142,38 +142,49 @@ fn new_modem_session_rebinds_and_clears_before_replaying() {
 }
 
 #[test]
-fn resolver_change_replaces_pending_status_and_is_acknowledged() {
-    let mut s = Session::new(1).unwrap();
-    let mut old = connected();
-    old.network = Some(
-        old.network
-            .unwrap()
-            .with_dns([Some("192.0.2.53".parse().unwrap()), None], [None; 2])
-            .unwrap(),
-    );
-    s.observe(old.clone());
-    ready(&mut s);
-    let mut next = old.clone();
-    next.network = Some(
-        next.network
-            .unwrap()
-            .with_dns([Some("192.0.2.54".parse().unwrap()), None], [None; 2])
-            .unwrap(),
-    );
-    s.observe(next);
-    let stale = s.poll(2).unwrap();
-    assert_eq!(stale[3], 0x20); // Resolver metadata is not an adapter switch.
-    s.observe(old);
-    let replacement = s.poll(2002).unwrap();
-    assert_ne!(&stale[1..3], &replacement[1..3]);
-    s.receive(&ack(&stale));
-    assert!(!s.settled());
-    s.receive(&ack(&replacement));
-    assert!(!s.settled());
-    let profile = s.poll(2004).unwrap();
-    assert_eq!(profile[3], 0x43);
-    s.receive(&ack(&profile));
-    assert!(s.settled());
+fn resolver_replacement_during_either_positive_ack_uses_only_latest_metadata() {
+    for pending_message in [0x43, 0x20] {
+        let mut s = Session::new(1).unwrap();
+        let mut old = connected();
+        old.network = Some(
+            old.network
+                .unwrap()
+                .with_dns([Some("192.0.2.53".parse().unwrap()), None], [None; 2])
+                .unwrap(),
+        );
+        s.observe(old.clone());
+        ready(&mut s);
+        let mut next = old.clone();
+        next.network = Some(
+            next.network
+                .unwrap()
+                .with_dns([Some("192.0.2.54".parse().unwrap()), None], [None; 2])
+                .unwrap(),
+        );
+        s.observe(next);
+        let mut stale = s.poll(2).unwrap();
+        assert_eq!(stale[3], 0x43); // Cached switch: profile, then station.
+        if pending_message == 0x20 {
+            s.receive(&ack(&stale));
+            assert!(!s.settled());
+            stale = s.poll(2).unwrap();
+        }
+        assert_eq!(stale[3], pending_message);
+        s.observe(old);
+        let replacement = s.poll(2002).unwrap();
+        assert_eq!(replacement[3], 0x43);
+        assert_ne!(&stale[1..3], &replacement[1..3]);
+        s.receive(&ack(&stale));
+        assert!(!s.settled());
+        s.receive(&ack(&replacement));
+        assert!(!s.settled());
+        let station = s.poll(2004).unwrap();
+        assert_eq!(station[3], 0x20);
+        // The final station report restores the current resolver, not stale .54.
+        assert_eq!(&station[23..30], &[0x13, 4, 0, 53, 2, 0, 192]);
+        s.receive(&ack(&station));
+        assert!(s.settled());
+    }
 }
 
 #[test]
@@ -186,13 +197,14 @@ fn default_route_change_is_reported_without_changing_link_identity() {
     s.observe(observation.clone());
     assert!(!s.settled());
     let update = s.poll(2).unwrap();
-    assert_eq!(update[3], 0x20); // No redundant administrative notification.
-    assert_eq!(&update[update.len() - 4..], &[0x24, 1, 0, 1]);
+    assert_eq!(update[3], 0x43); // No redundant administrative notification.
+    assert_eq!(&update[update.len() - 4..], &[0, 0, 0, 0]);
     s.receive(&ack(&update));
-    let profile = s.poll(2).unwrap();
-    assert_eq!(profile[3], 0x43);
-    assert_eq!(&profile[profile.len() - 4..], &[0, 0, 0, 0]);
-    s.receive(&ack(&profile));
+    assert!(!s.settled());
+    let station = s.poll(2).unwrap();
+    assert_eq!(station[3], 0x20);
+    assert_eq!(&station[station.len() - 4..], &[0x24, 1, 0, 1]);
+    s.receive(&ack(&station));
     assert!(s.settled());
     s.observe(observation);
     assert!(s.poll(3).is_none());
@@ -216,7 +228,7 @@ fn default_profile_requires_connected_validated_default_network() {
                     .with_default_route(default_route),
                 ),
             });
-            for id in [0x27, 0x20, 0x43, 0x34, 0x20] {
+            for id in [0x27, 0x20, 0x43, 0x34] {
                 let request = s.poll(0).unwrap();
                 assert_eq!(request[3], id);
                 if id == 0x43 {
@@ -233,63 +245,84 @@ fn default_profile_requires_connected_validated_default_network() {
             );
             assert!(!s.settled());
             s.receive(&ack(&profile));
+            assert!(!s.settled());
+            let station = s.poll(2).unwrap();
+            assert_eq!(station[3], 0x20);
+            s.receive(&ack(&station));
             assert!(s.settled());
         }
     }
 }
 
 #[test]
-fn loss_during_profile_ack_never_retries_stale_positive_status() {
-    let mut s = Session::new(1).unwrap();
-    let mut observation = connected();
-    observation.network = observation.network.map(|n| n.with_default_route(true));
-    s.observe(observation);
-    for _ in 0..5 {
-        let request = s.poll(0).unwrap();
-        s.receive(&ack(&request));
+fn loss_during_either_positive_ack_never_retries_stale_availability() {
+    for pending_message in [0x43, 0x20] {
+        let mut s = Session::new(1).unwrap();
+        let mut observation = connected();
+        observation.network = observation.network.map(|n| n.with_default_route(true));
+        s.observe(observation);
+        for _ in 0..4 {
+            let request = s.poll(0).unwrap();
+            s.receive(&ack(&request));
+        }
+        let mut positive = s.poll(0).unwrap();
+        assert_eq!(positive[3], 0x43);
+        assert_eq!(&positive[positive.len() - 4..], &[0, 0, 0, 0]);
+        if pending_message == 0x20 {
+            s.receive(&ack(&positive));
+            assert!(!s.settled());
+            positive = s.poll(0).unwrap();
+        }
+        assert_eq!(positive[3], pending_message);
+        s.observe(Observation {
+            enabled: false,
+            network: None,
+        });
+        let replacement = s.poll(2000).unwrap();
+        assert_eq!(replacement[3], 0x43);
+        assert_ne!(&positive[1..3], &replacement[1..3]);
+        s.receive(&ack(&positive));
+        assert!(s.poll(2001).is_none());
+        s.receive(&ack(&replacement));
+        let down = s.poll(2002).unwrap();
+        assert_eq!(down[3], 0x20);
+        s.receive(&ack(&down));
+        let switch = s.poll(2003).unwrap();
+        assert_eq!(switch[3], 0x34);
+        assert_eq!(&switch[switch.len() - 1..], &[0]);
+        s.receive(&ack(&switch));
+        assert!(s.settled());
+        assert_eq!(s.diagnostics().stage, 4);
     }
-    let positive = s.poll(0).unwrap();
-    assert_eq!(&positive[positive.len() - 4..], &[0, 0, 0, 0]);
-    s.observe(Observation {
-        enabled: false,
-        network: None,
-    });
-    let replacement = s.poll(2000).unwrap();
-    assert_eq!(replacement[3], 0x43);
-    assert_ne!(&positive[1..3], &replacement[1..3]);
-    s.receive(&ack(&positive));
-    assert!(s.poll(2001).is_none());
-    s.receive(&ack(&replacement));
-    let down = s.poll(2002).unwrap();
-    assert_eq!(down[3], 0x20);
-    s.receive(&ack(&down));
-    let switch = s.poll(2003).unwrap();
-    assert_eq!(switch[3], 0x34);
-    assert_eq!(&switch[switch.len() - 1..], &[0]);
-    s.receive(&ack(&switch));
-    assert!(s.settled());
-    assert_eq!(s.diagnostics().stage, 4);
 }
 
 #[test]
-fn rejected_profile_never_settles_available() {
-    let mut s = Session::new(1).unwrap();
-    s.observe(connected());
-    for _ in 0..5 {
-        let request = s.poll(0).unwrap();
-        s.receive(&ack(&request));
+fn rejection_of_either_positive_step_never_settles_available() {
+    for rejected_message in [0x43, 0x20] {
+        let mut s = Session::new(1).unwrap();
+        s.observe(connected());
+        for _ in 0..4 {
+            let request = s.poll(0).unwrap();
+            s.receive(&ack(&request));
+        }
+        let mut request = s.poll(1).unwrap();
+        assert_eq!(request[3], 0x43);
+        if rejected_message == 0x20 {
+            s.receive(&ack(&request));
+            assert!(!s.settled());
+            request = s.poll(1).unwrap();
+        }
+        assert_eq!(request[3], rejected_message);
+        let mut rejected = ack(&request);
+        rejected[10] = 1;
+        rejected[12] = 5;
+        s.receive(&rejected);
+        assert!(s.failed());
+        assert!(!s.settled());
+        assert_eq!(s.diagnostics().operation, rejected_message as u16);
+        assert_eq!(s.diagnostics().error, 5);
+        assert!(s.poll(10_000).is_none());
     }
-    let request = s.poll(1).unwrap();
-    assert_eq!(request[3], 0x43);
-    let mut rejected = ack(&request);
-    rejected[10] = 1;
-    rejected[12] = 5;
-    s.receive(&rejected);
-    assert!(s.failed());
-    assert!(!s.settled());
-    assert_eq!(s.diagnostics().operation, 0x43);
-    assert_eq!(s.diagnostics().error, 5);
-    assert!(s.poll(10_000).is_none());
 }
 
 #[test]
@@ -355,7 +388,7 @@ fn connection_loss_preserves_the_acknowledged_administrative_switch() {
         assert!(s.poll(2).is_none());
         assert!(s.settled());
         s.observe(connected());
-        for id in [0x20, 0x43] {
+        for id in [0x43, 0x20] {
             let packet = s.poll(3).unwrap();
             assert_eq!(packet[3], id);
             s.receive(&ack(&packet));
@@ -385,7 +418,7 @@ fn networkless_adapter_enable_is_reported_once_before_connection() {
         assert!(s.settled());
     }
     s.observe(connected());
-    for id in [0x20, 0x43] {
+    for id in [0x43, 0x20] {
         let packet = s.poll(2).unwrap();
         assert_eq!(packet[3], id);
         s.receive(&ack(&packet));
@@ -418,7 +451,7 @@ fn superseded_unacknowledged_switch_is_reconciled_with_a_new_transaction() {
     s.receive(&ack(&disable));
     assert!(s.poll(2002).is_none());
     s.receive(&ack(&enable));
-    for id in [0x20, 0x43] {
+    for id in [0x43, 0x20] {
         let packet = s.poll(2003).unwrap();
         assert_eq!(packet[3], id);
         s.receive(&ack(&packet));

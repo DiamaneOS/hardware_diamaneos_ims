@@ -54,7 +54,10 @@ Loss updates first report profile0 as not met, then withdraw STA availability,
 then report the actual administrative switch state. The authenticated
 FP6.QREL.16.111.0 runtime callback sends profile status before STA status; this
 sequence prevents leaving the old positive profile during disconnection. Positive
-updates retain switch, STA and profile ordering. Each step still requires its own
+updates report the switch when required, then the current profile, then STA,
+matching the stock runtime callback on connected inputs too. An acknowledged
+switch bypass still uses profile before STA. Availability settles only after
+the final station acknowledgement. Each step still requires its own
 matching acknowledgement; a rejected profile stops the session, and an obsolete
 transaction cannot settle a replacement observation. Both subscription bindings
 remain independent. Native radio/Wi-Fi recovery qualification remains necessary.
