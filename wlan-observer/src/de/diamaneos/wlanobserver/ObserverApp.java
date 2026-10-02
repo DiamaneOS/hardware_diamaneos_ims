@@ -94,22 +94,22 @@ public final class ObserverApp extends Application {
     private Snapshot read() {
         Snapshot result = disconnected(wifi.isWifiEnabled());
         if (!result.enabled) return result;
-        Network selected = null;
-        NetworkCapabilities selectedCaps = null;
-        // Do not mix identities/addresses from multiple simultaneous Wi-Fi links.
-        // Multi-STA requires a separately qualified primary-network association.
-        for (Network network : connectivity.getAllNetworks()) {
-            NetworkCapabilities caps = connectivity.getNetworkCapabilities(network);
-            if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-                    || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                    || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) continue;
-            if (selected != null) return result;
-            selected = network; selectedCaps = caps;
-        }
+        // Use the same primary Wi-Fi link as WifiManager's connection identity.
+        // Never join global WifiInfo to an arbitrary enumerated network.
+        Network selected = wifi.getCurrentNetwork();
         if (selected == null) return result;
+        NetworkCapabilities selectedCaps = connectivity.getNetworkCapabilities(selected);
+        if (selectedCaps == null || !selectedCaps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+                || !selectedCaps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                || !selectedCaps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) return result;
+        // The synchronous capabilities getter redacts WifiInfo's network ID.
+        // Bind the global connection identity to this raw Wi-Fi Network through
+        // the read-only primary-network getter instead of treating redaction as
+        // evidence of association. No Settings or location permission is needed.
         boolean defaultBefore = defaultState.usesWifi();
         WifiInfo info = wifi.getConnectionInfo();
-        if (info == null || info.getSupplicantState() != SupplicantState.COMPLETED) return result;
+        if (info == null || info.getNetworkId() < 0
+                || info.getSupplicantState() != SupplicantState.COMPLETED) return result;
         String value = info.getBSSID();
         if (value == null || !value.matches("(?i)[0-9a-f]{2}(:[0-9a-f]{2}){5}")) return result;
         String[] parts = value.split(":");
@@ -144,7 +144,9 @@ public final class ObserverApp extends Application {
         }
         WifiInfo after = wifi.getConnectionInfo();
         NetworkCapabilities capsAfter = connectivity.getNetworkCapabilities(selected);
-        if (after == null || after.getNetworkId() != info.getNetworkId()
+        if (!selected.equals(wifi.getCurrentNetwork()) || after == null
+                || after.getSupplicantState() != SupplicantState.COMPLETED
+                || after.getNetworkId() != info.getNetworkId()
                 || !value.equals(after.getBSSID()) || capsAfter == null) return disconnected(result.enabled);
         result.connected = result.hasIpv4 || result.hasIpv6;
         result.defaultRoute = result.connected && defaultBefore && defaultState.usesWifi();
