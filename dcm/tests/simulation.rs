@@ -296,6 +296,7 @@ fn destruction_and_foreign_deactivation_preserve_other_client() {
     let other = Peer { node: 3, port: 101 };
     e.receive(other, &deactivate(pdp(&a)));
     assert_eq!(e.session_count(), 1);
+    assert_eq!(e.diagnostics().modem_releases_by_slot, [0; 4]);
     assert_eq!(e.peer_gone(other).len(), 0);
     assert_eq!(e.peer_gone(MODEM).len(), 1);
 }
@@ -304,11 +305,23 @@ fn destruction_and_foreign_deactivation_preserve_other_client() {
 fn instance_destroy_is_client_scoped_and_releases_the_broker() {
     let mut e = connected();
     e.receive(MODEM, &activate(1, 1, 0, true, 0));
+    let other = Peer { node: 3, port: 101 };
+    e.receive(other, &activate(2, 2, 0, false, 0));
     let mut f = Encoder::new(Kind::Request, 2, 0x33);
     f.tlv(1, &0u32.to_le_bytes()).unwrap();
-    let out = e.receive(MODEM, &f.finish());
-    assert_eq!(e.session_count(), 0);
+    let packet = f.finish();
+    let out = e.receive(MODEM, &packet);
+    assert_eq!(e.session_count(), 1);
     assert!(out.iter().any(|e| matches!(e, Effect::Release(_))));
+    let diagnostics = e.diagnostics();
+    assert_eq!(diagnostics.modem_instance_destructions_by_slot, [0, 1, 0, 0]);
+    assert_eq!(diagnostics.modem_releases_by_slot, [0; 4]);
+    assert_eq!(diagnostics.missing_family_releases_by_slot, [0; 4]);
+    e.receive(MODEM, &packet); // A duplicate must not count nonexistent removals.
+    assert_eq!(e.diagnostics().modem_instance_destructions_by_slot, [0, 1, 0, 0]);
+    e.receive(other, &packet);
+    assert_eq!(e.diagnostics().modem_instance_destructions_by_slot, [0, 1, 1, 0]);
+    assert_eq!(e.session_count(), 0);
 }
 #[test]
 fn malformed_control_payload_is_not_acknowledged_as_success() {
@@ -324,6 +337,7 @@ fn malformed_control_payload_is_not_acknowledged_as_success() {
             Some([1, 0, 0x3a, 0].as_slice())
         );
     }
+    assert_eq!(e.diagnostics().modem_instance_destructions_by_slot, [0; 4]);
 }
 #[test]
 fn control_packets_use_exact_uapi_layout() {
