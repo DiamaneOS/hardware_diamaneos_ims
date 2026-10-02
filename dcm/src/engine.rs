@@ -495,8 +495,18 @@ impl Engine {
             let slot = (self.sessions[i].activation.slot + 1) as usize;
             self.diagnostics.modem_releases_by_slot[slot] =
                 self.diagnostics.modem_releases_by_slot[slot].saturating_add(1);
-            self.sessions.remove(i);
+            let session = self.sessions.remove(i);
             out.extend(self.release_unused());
+            // The deactivate response acknowledges the request; the modem also
+            // expects a terminal PDP indication for the original context. Stock
+            // emits this after its data-service teardown, before a replacement
+            // activation. Revoke ownership and release an unused broker request
+            // first. Never include an address or notify another owner's context.
+            let seq = self.sequence(peer);
+            out.push(Effect::Send(
+                peer,
+                p::indication(seq, session.id, &session.activation, None, false),
+            ));
         }
         out
     }
