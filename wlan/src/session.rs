@@ -23,6 +23,9 @@ enum Step {
     Switch,
     Status,
     Profile,
+    WithdrawProfile,
+    WithdrawStatus,
+    WithdrawSwitch,
     Idle,
     Failed,
 }
@@ -85,7 +88,27 @@ impl Session {
         // Only one desired snapshot is retained. No unbounded event history.
         self.desired = observation;
         if self.step == Step::Idle && self.confirmed.as_ref() != Some(&self.desired) {
-            self.step = Step::Switch;
+            self.step = self.update_start();
+        }
+    }
+
+    fn update_start(&self) -> Step {
+        if self.desired.network.is_none() {
+            Step::WithdrawProfile
+        } else {
+            Step::Switch
+        }
+    }
+
+    fn settle_update(&mut self) -> Step {
+        if let Some(s) = &self.sending {
+            self.previous_bssid = s.network.as_ref().map_or([0; 6], |n| n.bssid);
+        }
+        self.confirmed = self.sending.take();
+        if self.confirmed.as_ref() == Some(&self.desired) {
+            Step::Idle
+        } else {
+            self.update_start()
         }
     }
 
@@ -106,9 +129,9 @@ impl Session {
         let stage = match self.step {
             Step::Bind => 0,
             Step::Clear => 1,
-            Step::ClearProfile | Step::Profile => 7,
-            Step::Switch => 2,
-            Step::Status => 3,
+            Step::ClearProfile | Step::Profile | Step::WithdrawProfile => 7,
+            Step::Switch | Step::WithdrawSwitch => 2,
+            Step::Status | Step::WithdrawStatus => 3,
             Step::Idle if self.confirmed.as_ref().is_some_and(|s| s.network.is_some()) => 5,
             Step::Idle => 4,
             Step::Failed => 6,
@@ -129,11 +152,18 @@ impl Session {
             }
             // Never retransmit a connected payload after the observation changed.
             // Keep the old transaction quarantined by moving to a fresh ID.
-            if matches!(self.step, Step::Switch | Step::Status | Step::Profile)
-                && self.sending.as_ref() != Some(&self.desired)
+            if matches!(
+                self.step,
+                Step::Switch
+                    | Step::Status
+                    | Step::Profile
+                    | Step::WithdrawProfile
+                    | Step::WithdrawStatus
+                    | Step::WithdrawSwitch
+            ) && self.sending.as_ref() != Some(&self.desired)
             {
                 self.pending = None;
-                self.step = Step::Switch;
+                self.step = self.update_start();
                 return self.poll(now_ms);
             }
             if pending.attempts >= MAX_ATTEMPTS {
@@ -150,6 +180,15 @@ impl Session {
         if matches!(self.step, Step::Idle | Step::Failed) {
             return None;
         }
+        if self.step == Step::WithdrawProfile && self.desired.network.is_some() {
+            self.step = Step::Switch;
+        }
+        if matches!(self.step, Step::WithdrawStatus | Step::WithdrawSwitch)
+            && self.sending.as_ref() != Some(&self.desired)
+        {
+            self.step = self.update_start();
+            return self.poll(now_ms);
+        }
         let tx = self.next_transaction;
         let Some(next) = tx.checked_add(1) else {
             self.error = -2;
@@ -161,6 +200,14 @@ impl Session {
             Step::Bind => (BIND_SUBSCRIPTION, bind_subscription(tx, self.subscription)),
             Step::Clear => (WLAN_STATUS, withdrawal(tx, [0; 6])),
             Step::ClearProfile => (DEFAULT_PROFILE_STATUS, default_profile_status(tx, false)),
+            Step::WithdrawProfile => {
+                self.sending = Some(self.desired.clone());
+                // Revoke the default profile before withdrawing STA or the
+                // switch, matching stock's runtime profile-before-STA order.
+                (DEFAULT_PROFILE_STATUS, default_profile_status(tx, false))
+            }
+            Step::WithdrawStatus => (WLAN_STATUS, withdrawal(tx, self.previous_bssid)),
+            Step::WithdrawSwitch => (DATA_SETTINGS, wifi_switch(tx, self.desired.enabled)),
             Step::Switch => {
                 self.sending = Some(self.desired.clone());
                 (DATA_SETTINGS, wifi_switch(tx, self.desired.enabled))
@@ -169,7 +216,7 @@ impl Session {
                 // A disconnect arriving during switch acknowledgement takes
                 // precedence over the old connected snapshot.
                 if self.sending.as_ref() != Some(&self.desired) {
-                    self.step = Step::Switch;
+                    self.step = self.update_start();
                     return self.poll(now_ms);
                 }
                 let packet = match self.sending.as_ref().and_then(|s| s.network.as_ref()) {
@@ -182,7 +229,7 @@ impl Session {
                 // A lost/replaced observation must never gain a stale positive
                 // default-profile update, even after STA acknowledgement.
                 if self.sending.as_ref() != Some(&self.desired) {
-                    self.step = Step::Switch;
+                    self.step = self.update_start();
                     return self.poll(now_ms);
                 }
                 let connected_default = self
@@ -234,20 +281,12 @@ impl Session {
         self.step = match self.step {
             Step::Bind => Step::Clear,
             Step::Clear => Step::ClearProfile,
-            Step::ClearProfile => Step::Switch,
+            Step::ClearProfile => self.update_start(),
             Step::Switch => Step::Status,
             Step::Status => Step::Profile,
-            Step::Profile => {
-                if let Some(s) = &self.sending {
-                    self.previous_bssid = s.network.as_ref().map_or([0; 6], |n| n.bssid);
-                }
-                self.confirmed = self.sending.take();
-                if self.confirmed.as_ref() == Some(&self.desired) {
-                    Step::Idle
-                } else {
-                    Step::Switch
-                }
-            }
+            Step::Profile | Step::WithdrawSwitch => self.settle_update(),
+            Step::WithdrawProfile => Step::WithdrawStatus,
+            Step::WithdrawStatus => Step::WithdrawSwitch,
             _ => Step::Failed,
         };
     }

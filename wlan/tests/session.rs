@@ -71,7 +71,8 @@ fn disconnect_during_pending_up_does_not_retry_stale_up() {
         network: None,
     });
     let replacement = s.poll(2000).unwrap();
-    assert_eq!(replacement[3], 0x34);
+    assert_eq!(replacement[3], 0x43);
+    assert_eq!(&replacement[replacement.len() - 4..], &[1, 0, 0, 0]);
     assert_ne!(&replacement[1..3], &up[1..3]);
     s.receive(&ack(&up));
     assert!(s.poll(2001).is_none());
@@ -119,7 +120,7 @@ fn diagnostics_distinguish_pending_and_acknowledged_status() {
         enabled: false,
         network: None,
     });
-    assert_eq!(s.diagnostics().stage, 2);
+    assert_eq!(s.diagnostics().stage, 7);
     for _ in 0..3 {
         let p = s.poll(1).unwrap();
         s.receive(&ack(&p));
@@ -258,17 +259,18 @@ fn loss_during_profile_ack_never_retries_stale_positive_status() {
         network: None,
     });
     let replacement = s.poll(2000).unwrap();
-    assert_eq!(replacement[3], 0x34);
+    assert_eq!(replacement[3], 0x43);
+    assert_ne!(&positive[1..3], &replacement[1..3]);
     s.receive(&ack(&positive));
     assert!(s.poll(2001).is_none());
     s.receive(&ack(&replacement));
     let down = s.poll(2002).unwrap();
     assert_eq!(down[3], 0x20);
     s.receive(&ack(&down));
-    let negative = s.poll(2003).unwrap();
-    assert_eq!(negative[3], 0x43);
-    assert_eq!(&negative[negative.len() - 4..], &[1, 0, 0, 0]);
-    s.receive(&ack(&negative));
+    let switch = s.poll(2003).unwrap();
+    assert_eq!(switch[3], 0x34);
+    assert_eq!(&switch[switch.len() - 1..], &[0]);
+    s.receive(&ack(&switch));
     assert!(s.settled());
     assert_eq!(s.diagnostics().stage, 4);
 }
@@ -292,4 +294,49 @@ fn rejected_profile_never_settles_available() {
     assert_eq!(s.diagnostics().operation, 0x43);
     assert_eq!(s.diagnostics().error, 5);
     assert!(s.poll(10_000).is_none());
+}
+
+#[test]
+fn withdrawal_revokes_profile_before_station_and_administrative_switch() {
+    for subscription in [1, 2] {
+        let mut s = Session::new(subscription).unwrap();
+        s.observe(connected());
+        ready(&mut s);
+        s.observe(Observation {
+            enabled: false,
+            network: None,
+        });
+        for (id, stage) in [(0x43, 7), (0x20, 3), (0x34, 2)] {
+            let packet = s.poll(1).unwrap();
+            assert_eq!(packet[3], id);
+            assert_eq!(s.diagnostics().stage, stage);
+            assert!(!s.settled());
+            if id == 0x43 {
+                assert_eq!(&packet[packet.len() - 4..], &[1, 0, 0, 0]);
+            }
+            s.receive(&ack(&packet));
+        }
+        assert!(s.settled());
+        assert_eq!(s.diagnostics().stage, 4);
+    }
+}
+
+#[test]
+fn rejected_withdrawal_profile_stops_before_station_or_switch_notification() {
+    let mut s = Session::new(1).unwrap();
+    s.observe(connected());
+    ready(&mut s);
+    s.observe(Observation {
+        enabled: false,
+        network: None,
+    });
+    let packet = s.poll(1).unwrap();
+    assert_eq!(packet[3], 0x43);
+    let mut rejected = ack(&packet);
+    rejected[10] = 1;
+    rejected[12] = 5;
+    s.receive(&rejected);
+    assert!(s.failed());
+    assert!(!s.settled());
+    assert!(s.poll(10000).is_none());
 }

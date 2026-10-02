@@ -50,6 +50,15 @@ runtime does not advertise unimplemented capabilities or register for optional
 measurement requests. It acknowledges the stock default connectivity profile
 alongside STA state, including negative startup reconciliation and withdrawal.
 
+Loss updates first report profile0 as not met, then withdraw STA availability,
+then report the actual administrative switch state. The authenticated
+FP6.QREL.16.111.0 runtime callback sends profile status before STA status; this
+sequence prevents leaving the old positive profile during disconnection. Positive
+updates retain switch, STA and profile ordering. Each step still requires its own
+matching acknowledgement; a rejected profile stops the session, and an obsolete
+transaction cannot settle a replacement observation. Both subscription bindings
+remain independent. Native radio/Wi-Fi recovery qualification remains necessary.
+
 Sensitive observations have no `Debug` or `Display` implementation. Encoded byte
 buffers still contain identifiers; callers must not log or persist them. The
 observer uses the shared Android preferred-address flag rule: reject failed-DAD
