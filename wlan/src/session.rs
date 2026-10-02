@@ -46,6 +46,9 @@ pub struct Session {
     desired: Observation,
     sending: Option<Observation>,
     confirmed: Option<Observation>,
+    // Administrative state is independent of connection/metadata settlement.
+    // None also covers a command whose effect has not been acknowledged.
+    acknowledged_switch: Option<bool>,
     previous_bssid: [u8; 6],
     failed_operation: u16,
     error: i32,
@@ -75,6 +78,7 @@ impl Session {
             },
             sending: None,
             confirmed: None,
+            acknowledged_switch: None,
             previous_bssid: [0; 6],
             failed_operation: 0,
             error: 0,
@@ -189,6 +193,20 @@ impl Session {
             self.step = self.update_start();
             return self.poll(now_ms);
         }
+        if self.acknowledged_switch == Some(self.desired.enabled) {
+            match self.step {
+                Step::Switch => {
+                    self.sending = Some(self.desired.clone());
+                    self.step = Step::Status;
+                    return self.poll(now_ms);
+                }
+                Step::WithdrawSwitch => {
+                    self.step = self.settle_update();
+                    return self.poll(now_ms);
+                }
+                _ => {}
+            }
+        }
         let tx = self.next_transaction;
         let Some(next) = tx.checked_add(1) else {
             self.error = -2;
@@ -207,9 +225,15 @@ impl Session {
                 (DEFAULT_PROFILE_STATUS, default_profile_status(tx, false))
             }
             Step::WithdrawStatus => (WLAN_STATUS, withdrawal(tx, self.previous_bssid)),
-            Step::WithdrawSwitch => (DATA_SETTINGS, wifi_switch(tx, self.desired.enabled)),
+            Step::WithdrawSwitch => {
+                self.acknowledged_switch = None;
+                (DATA_SETTINGS, wifi_switch(tx, self.desired.enabled))
+            }
             Step::Switch => {
                 self.sending = Some(self.desired.clone());
+                // A superseded or lost acknowledgement cannot leave the old
+                // cached value trusted after this command may have applied.
+                self.acknowledged_switch = None;
                 (DATA_SETTINGS, wifi_switch(tx, self.desired.enabled))
             }
             Step::Status => {
@@ -278,6 +302,9 @@ impl Session {
             Err(_) => return,
         }
         self.pending = None;
+        if matches!(self.step, Step::Switch | Step::WithdrawSwitch) {
+            self.acknowledged_switch = self.sending.as_ref().map(|s| s.enabled);
+        }
         self.step = match self.step {
             Step::Bind => Step::Clear,
             Step::Clear => Step::ClearProfile,

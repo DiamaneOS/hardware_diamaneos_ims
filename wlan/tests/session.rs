@@ -161,17 +161,14 @@ fn resolver_change_replaces_pending_status_and_is_acknowledged() {
             .unwrap(),
     );
     s.observe(next);
-    let switch = s.poll(1).unwrap();
-    s.receive(&ack(&switch));
     let stale = s.poll(2).unwrap();
+    assert_eq!(stale[3], 0x20); // Resolver metadata is not an adapter switch.
     s.observe(old);
     let replacement = s.poll(2002).unwrap();
     assert_ne!(&stale[1..3], &replacement[1..3]);
     s.receive(&ack(&stale));
     assert!(!s.settled());
     s.receive(&ack(&replacement));
-    let status = s.poll(2003).unwrap();
-    s.receive(&ack(&status));
     assert!(!s.settled());
     let profile = s.poll(2004).unwrap();
     assert_eq!(profile[3], 0x43);
@@ -188,9 +185,8 @@ fn default_route_change_is_reported_without_changing_link_identity() {
     observation.network = observation.network.map(|n| n.with_default_route(true));
     s.observe(observation.clone());
     assert!(!s.settled());
-    let switch = s.poll(1).unwrap();
-    s.receive(&ack(&switch));
     let update = s.poll(2).unwrap();
+    assert_eq!(update[3], 0x20); // No redundant administrative notification.
     assert_eq!(&update[update.len() - 4..], &[0x24, 1, 0, 1]);
     s.receive(&ack(&update));
     let profile = s.poll(2).unwrap();
@@ -339,4 +335,93 @@ fn rejected_withdrawal_profile_stops_before_station_or_switch_notification() {
     assert!(s.failed());
     assert!(!s.settled());
     assert!(s.poll(10000).is_none());
+}
+
+#[test]
+fn connection_loss_preserves_the_acknowledged_administrative_switch() {
+    for subscription in [1, 2] {
+        let mut s = Session::new(subscription).unwrap();
+        s.observe(connected());
+        ready(&mut s);
+        s.observe(Observation {
+            enabled: true,
+            network: None,
+        });
+        for id in [0x43, 0x20] {
+            let packet = s.poll(1).unwrap();
+            assert_eq!(packet[3], id);
+            s.receive(&ack(&packet));
+        }
+        assert!(s.poll(2).is_none());
+        assert!(s.settled());
+        s.observe(connected());
+        for id in [0x20, 0x43] {
+            let packet = s.poll(3).unwrap();
+            assert_eq!(packet[3], id);
+            s.receive(&ack(&packet));
+        }
+        assert!(s.settled());
+    }
+}
+
+#[test]
+fn networkless_adapter_enable_is_reported_once_before_connection() {
+    let mut s = Session::new(1).unwrap();
+    s.observe(connected());
+    ready(&mut s);
+    for enabled in [false, true] {
+        s.observe(Observation {
+            enabled,
+            network: None,
+        });
+        for id in [0x43, 0x20, 0x34] {
+            let packet = s.poll(1).unwrap();
+            assert_eq!(packet[3], id);
+            if id == 0x34 {
+                assert_eq!(*packet.last().unwrap(), u8::from(enabled));
+            }
+            s.receive(&ack(&packet));
+        }
+        assert!(s.settled());
+    }
+    s.observe(connected());
+    for id in [0x20, 0x43] {
+        let packet = s.poll(2).unwrap();
+        assert_eq!(packet[3], id);
+        s.receive(&ack(&packet));
+    }
+    assert!(s.settled());
+}
+
+#[test]
+fn superseded_unacknowledged_switch_is_reconciled_with_a_new_transaction() {
+    let mut s = Session::new(1).unwrap();
+    s.observe(connected());
+    ready(&mut s);
+    s.observe(Observation {
+        enabled: false,
+        network: None,
+    });
+    for id in [0x43, 0x20] {
+        let packet = s.poll(1).unwrap();
+        assert_eq!(packet[3], id);
+        s.receive(&ack(&packet));
+    }
+    let disable = s.poll(1).unwrap();
+    assert_eq!(disable[3], 0x34);
+    s.observe(connected());
+    // The unacknowledged disable may have applied. Do not trust the old "on".
+    let enable = s.poll(2001).unwrap();
+    assert_eq!(enable[3], 0x34);
+    assert_eq!(*enable.last().unwrap(), 1);
+    assert_ne!(&enable[1..3], &disable[1..3]);
+    s.receive(&ack(&disable));
+    assert!(s.poll(2002).is_none());
+    s.receive(&ack(&enable));
+    for id in [0x20, 0x43] {
+        let packet = s.poll(2003).unwrap();
+        assert_eq!(packet[3], id);
+        s.receive(&ack(&packet));
+    }
+    assert!(s.settled());
 }
