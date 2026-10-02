@@ -134,7 +134,9 @@ Selection is explicit through the two opt-in makefiles. The existing DCM broker
 must not be described as implementing this path. The reporter currently binds the
 configured primary/secondary DSD contexts, clears STA status before announcing a
 snapshot, reports the actual Wi-Fi switch state and bounded same-link DNS metadata, and requires acknowledgements.
-It advertises no optional capabilities or fabricated WQE quality. The tested firmware acknowledges the zero-BSSID disconnected startup form;
+It reports only the stock default connectivity profile from observed connection,
+validation and default-route state. It advertises no optional measurement
+capabilities and supplies no signal/throughput estimates. The tested firmware acknowledges the zero-BSSID disconnected startup form;
 a rejection on any firmware stops that session rather than skipping reconciliation.
 
 The observer handles one unambiguous connected Internet-capable Wi-Fi network.
@@ -160,7 +162,8 @@ seccomp filter is not widened for logging; init routes its standard error to
 `/dev/null`, so stderr is not evidence of device progress.
 
 Stages are -1 (no endpoint/observation yet), 0 (bind), 1 (startup clear), 2 (switch),
-3 (status), 4 (acknowledged unavailable), 5 (acknowledged available), 6 (failed).
+3 (STA status), 4 (acknowledged unavailable), 5 (acknowledged available), 6 (failed),
+and 7 (default connectivity profile). Settled states require both acknowledgements.
 Operation is the pending or failed message ID. Error0 means no recorded failure,
 positive values are QMI errors, -1 is timeout, -2 transaction exhaustion, and -3
 local encoding failure. Status is sampled asynchronously; it does not establish
