@@ -21,7 +21,7 @@
 | Request | Behavior |
 | --- | --- |
 | `0x20` activation | Acknowledge ID/cookie/optional instance first, request IMS or EIMS, and send result/address indication only from a validated live network |
-| `0x21` deactivation | Scope to the requesting client and optional instance; release the last group reference |
+| `0x21` deactivation | Scope to the requesting client and optional instance, then acknowledge, revoke the context, release the last group reference, then send its terminal result without an address |
 | `0x22` get IP | Observed handler sends no reply. No fabricated address |
 | `0x23` link address | Validate the port/family/counted address aggregate and acknowledge receipt. Never log its contents |
 | `0x2e`, `0x34` state reports | Validate optional/state fields and acknowledge. Do not enable unrelated RCS helpers |
