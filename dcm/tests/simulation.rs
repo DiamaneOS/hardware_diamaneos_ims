@@ -131,6 +131,76 @@ fn dual_family_shares_network_and_releases_last_reference() {
         .any(|e| matches!(e, Effect::Release(_))));
 }
 #[test]
+fn deactivation_completes_the_original_context_before_replacement() {
+    let mut e = connected();
+    let activation = e.receive(MODEM, &activate(1, 1, 1, false, 0));
+    let id = pdp(&activation);
+    let old_request = request(&activation);
+    e.report(old_request, Some(network()));
+    let out = e.receive(MODEM, &deactivate(id));
+    assert_eq!(out.len(), 3);
+    let Effect::Send(to, response) = &out[0] else {
+        panic!()
+    };
+    assert_eq!(*to, MODEM);
+    let response = Frame::parse(response).unwrap();
+    assert_eq!(
+        (response.kind, response.id, response.txn),
+        (Kind::Response, DEACTIVATE, 55)
+    );
+    assert_eq!(response.tlv(0x10), Some([250].as_slice()));
+    assert!(matches!(out[1], Effect::Release(r) if r == old_request));
+    let Effect::Send(to, terminal) = &out[2] else {
+        panic!()
+    };
+    assert_eq!(*to, MODEM);
+    let terminal = Frame::parse(terminal).unwrap();
+    assert_eq!((terminal.kind, terminal.id), (Kind::Indication, ACTIVATE));
+    assert_eq!(terminal.tlv(1), Some([id].as_slice()));
+    assert_eq!(terminal.tlv(2), Some([0, 0, 13, 0].as_slice()));
+    assert_eq!(terminal.tlv(0x10), Some(9u32.to_le_bytes().as_slice()));
+    assert!(terminal.tlv(0x11).is_none()); // No stale address in a terminal result.
+    assert_eq!(e.session_count(), 0);
+    assert!(e.report(old_request, Some(network())).is_empty());
+    let repeated = e.receive(MODEM, &deactivate(id));
+    assert_eq!(repeated.len(), 1); // An unknown/repeated ID cannot notify a removed owner.
+    let replacement = e.receive(MODEM, &activate(2, 1, 1, false, 0));
+    assert_ne!(request(&replacement).serial, old_request.serial);
+    assert_eq!(e.report(request(&replacement), Some(network())).len(), 1);
+}
+
+#[test]
+fn deactivation_notification_is_owner_scoped_and_preserves_shared_bearer() {
+    let mut e = connected();
+    let first = e.receive(MODEM, &activate(1, 1, 0, false, 0));
+    let second = e.receive(MODEM, &activate(2, 1, 1, false, 0));
+    let id = pdp(&first);
+    let other = Peer {
+        node: MODEM.node,
+        port: MODEM.port + 1,
+    };
+    assert_eq!(e.receive(other, &deactivate(id)).len(), 1);
+    let mut wrong_instance = Encoder::new(Kind::Request, 55, DEACTIVATE);
+    wrong_instance.tlv(1, &[id]).unwrap();
+    wrong_instance.tlv(0x10, &1u32.to_le_bytes()).unwrap();
+    assert_eq!(e.receive(MODEM, &wrong_instance.finish()).len(), 1);
+    assert_eq!(e.session_count(), 2);
+    let out = e.receive(MODEM, &deactivate(id));
+    assert_eq!(out.len(), 2); // Response, terminal result; shared bearer remains requested.
+    assert!(!out.iter().any(|x| matches!(x, Effect::Release(_))));
+    assert_eq!(e.session_count(), 1);
+    let up = e.report(request(&first), Some(network()));
+    assert_eq!(up.len(), 1);
+    let Effect::Send(to, bytes) = &up[0] else {
+        panic!()
+    };
+    assert_eq!(*to, MODEM);
+    assert_eq!(
+        Frame::parse(bytes).unwrap().tlv(1),
+        Some([pdp(&second)].as_slice())
+    );
+}
+#[test]
 fn missing_requested_family_never_reports_success() {
     let mut e = connected();
     let a = e.receive(MODEM, &activate(1, 1, 1, true, 0));
