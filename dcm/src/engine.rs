@@ -85,8 +85,12 @@ pub struct Diagnostics {
     pub active_groups: usize,
     pub sessions_by_slot: [usize; 4], // unspecified, then slots 0..2
     // Same slot indexing; counts only, never session or peer identifiers.
+    // Requests include duplicates and admission failures; releases count
+    // removed sessions, not successful bearer activations or shared releases.
     pub activation_requests_by_slot: [u64; 4],
+    // Explicit PDN deactivation (0x21) and instance destruction (0x33).
     pub modem_releases_by_slot: [u64; 4],
+    pub modem_instance_destructions_by_slot: [u64; 4],
     pub missing_family_releases_by_slot: [u64; 4],
     pub requests: u64,
     pub malformed: u64,
@@ -349,8 +353,14 @@ impl Engine {
             0x33 => {
                 // Width/mandatory validation above; scope destruction to this client.
                 let instance = p::u32_value(frame.required(1).unwrap()).unwrap();
+                let counts = &mut self.diagnostics.modem_instance_destructions_by_slot;
                 self.sessions.retain(|s| {
-                    !(s.peer == peer && s.activation.instance.unwrap_or(0) == instance)
+                    let remove = s.peer == peer && s.activation.instance.unwrap_or(0) == instance;
+                    if remove {
+                        let slot = (s.activation.slot + 1) as usize;
+                        counts[slot] = counts[slot].saturating_add(1);
+                    }
+                    !remove
                 });
                 let mut out = vec![Effect::Send(peer, p::response(frame.txn, frame.id, 0, 0))];
                 out.extend(self.release_unused());
