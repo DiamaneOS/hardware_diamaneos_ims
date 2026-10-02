@@ -23,7 +23,7 @@ fn ack(request: &[u8]) -> [u8; 14] {
     ]
 }
 fn ready(s: &mut Session) {
-    for id in [0x27, 0x20, 0x34, 0x20] {
+    for id in [0x27, 0x20, 0x43, 0x34, 0x20, 0x43] {
         let p = s.poll(0).unwrap();
         assert_eq!(p[3], id);
         s.receive(&ack(&p));
@@ -48,7 +48,7 @@ fn bind_clear_and_ack_before_announcing_available() {
     assert_eq!(&clear[clear.len() - 8..clear.len() - 4], &[0, 0, 0, 0]);
     assert!(a.poll(1).is_none());
     a.receive(&ack(&clear));
-    for id in [0x34, 0x20] {
+    for id in [0x43, 0x34, 0x20, 0x43] {
         let p = a.poll(2).unwrap();
         assert_eq!(p[3], id);
         a.receive(&ack(&p));
@@ -61,7 +61,7 @@ fn bind_clear_and_ack_before_announcing_available() {
 fn disconnect_during_pending_up_does_not_retry_stale_up() {
     let mut s = Session::new(1).unwrap();
     s.observe(connected());
-    for _ in 0..3 {
+    for _ in 0..4 {
         let p = s.poll(0).unwrap();
         s.receive(&ack(&p));
     }
@@ -110,7 +110,7 @@ fn diagnostics_distinguish_pending_and_acknowledged_status() {
     let mut s = Session::new(1).unwrap();
     s.observe(connected());
     assert_eq!(s.diagnostics().stage, 0);
-    for next_stage in [1, 2, 3, 5] {
+    for next_stage in [1, 7, 2, 3, 7, 5] {
         let p = s.poll(0).unwrap();
         s.receive(&ack(&p));
         assert_eq!(s.diagnostics().stage, next_stage);
@@ -120,7 +120,7 @@ fn diagnostics_distinguish_pending_and_acknowledged_status() {
         network: None,
     });
     assert_eq!(s.diagnostics().stage, 2);
-    for _ in 0..2 {
+    for _ in 0..3 {
         let p = s.poll(1).unwrap();
         s.receive(&ack(&p));
     }
@@ -171,6 +171,10 @@ fn resolver_change_replaces_pending_status_and_is_acknowledged() {
     s.receive(&ack(&replacement));
     let status = s.poll(2003).unwrap();
     s.receive(&ack(&status));
+    assert!(!s.settled());
+    let profile = s.poll(2004).unwrap();
+    assert_eq!(profile[3], 0x43);
+    s.receive(&ack(&profile));
     assert!(s.settled());
 }
 
@@ -188,7 +192,104 @@ fn default_route_change_is_reported_without_changing_link_identity() {
     let update = s.poll(2).unwrap();
     assert_eq!(&update[update.len() - 4..], &[0x24, 1, 0, 1]);
     s.receive(&ack(&update));
+    let profile = s.poll(2).unwrap();
+    assert_eq!(profile[3], 0x43);
+    assert_eq!(&profile[profile.len() - 4..], &[0, 0, 0, 0]);
+    s.receive(&ack(&profile));
     assert!(s.settled());
     s.observe(observation);
     assert!(s.poll(3).is_none());
+}
+
+#[test]
+fn default_profile_requires_connected_validated_default_network() {
+    for validated in [false, true] {
+        for default_route in [false, true] {
+            let mut s = Session::new(1).unwrap();
+            s.observe(Observation {
+                enabled: true,
+                network: Some(
+                    Connected::new(
+                        [2, 0, 0, 0, 0, 1],
+                        Some("192.0.2.1".parse().unwrap()),
+                        None,
+                        validated,
+                    )
+                    .unwrap()
+                    .with_default_route(default_route),
+                ),
+            });
+            for id in [0x27, 0x20, 0x43, 0x34, 0x20] {
+                let request = s.poll(0).unwrap();
+                assert_eq!(request[3], id);
+                if id == 0x43 {
+                    // Startup reconciliation never reports a connected profile.
+                    assert_eq!(&request[request.len() - 4..], &[1, 0, 0, 0]);
+                }
+                s.receive(&ack(&request));
+            }
+            let profile = s.poll(1).unwrap();
+            assert_eq!(profile[3], 0x43);
+            assert_eq!(
+                &profile[profile.len() - 4..],
+                &u32::from(!(validated && default_route)).to_le_bytes()
+            );
+            assert!(!s.settled());
+            s.receive(&ack(&profile));
+            assert!(s.settled());
+        }
+    }
+}
+
+#[test]
+fn loss_during_profile_ack_never_retries_stale_positive_status() {
+    let mut s = Session::new(1).unwrap();
+    let mut observation = connected();
+    observation.network = observation.network.map(|n| n.with_default_route(true));
+    s.observe(observation);
+    for _ in 0..5 {
+        let request = s.poll(0).unwrap();
+        s.receive(&ack(&request));
+    }
+    let positive = s.poll(0).unwrap();
+    assert_eq!(&positive[positive.len() - 4..], &[0, 0, 0, 0]);
+    s.observe(Observation {
+        enabled: false,
+        network: None,
+    });
+    let replacement = s.poll(2000).unwrap();
+    assert_eq!(replacement[3], 0x34);
+    s.receive(&ack(&positive));
+    assert!(s.poll(2001).is_none());
+    s.receive(&ack(&replacement));
+    let down = s.poll(2002).unwrap();
+    assert_eq!(down[3], 0x20);
+    s.receive(&ack(&down));
+    let negative = s.poll(2003).unwrap();
+    assert_eq!(negative[3], 0x43);
+    assert_eq!(&negative[negative.len() - 4..], &[1, 0, 0, 0]);
+    s.receive(&ack(&negative));
+    assert!(s.settled());
+    assert_eq!(s.diagnostics().stage, 4);
+}
+
+#[test]
+fn rejected_profile_never_settles_available() {
+    let mut s = Session::new(1).unwrap();
+    s.observe(connected());
+    for _ in 0..5 {
+        let request = s.poll(0).unwrap();
+        s.receive(&ack(&request));
+    }
+    let request = s.poll(1).unwrap();
+    assert_eq!(request[3], 0x43);
+    let mut rejected = ack(&request);
+    rejected[10] = 1;
+    rejected[12] = 5;
+    s.receive(&rejected);
+    assert!(s.failed());
+    assert!(!s.settled());
+    assert_eq!(s.diagnostics().operation, 0x43);
+    assert_eq!(s.diagnostics().error, 5);
+    assert!(s.poll(10_000).is_none());
 }

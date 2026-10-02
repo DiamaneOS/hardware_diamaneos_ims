@@ -6,6 +6,28 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 const BSSID: [u8; 6] = [2, 0, 0, 0, 0, 1];
 
 #[test]
+fn default_profile_wire_vectors_match_stock_identifier_and_status() {
+    use diamaneos_wlan_reporting::{default_profile_status, response_for, DEFAULT_PROFILE_STATUS};
+    for (ready, status) in [(true, 0), (false, 1)] {
+        assert_eq!(
+            default_profile_status(0x1234, ready).unwrap(),
+            vec![0, 0x34, 0x12, 0x43, 0, 14, 0, 1, 4, 0, 0, 0, 0, 0, 0x10, 4, 0, status, 0, 0, 0,]
+        );
+    }
+    assert_eq!(
+        default_profile_status(0, false),
+        Err(Error::ZeroTransaction)
+    );
+    let success = [2, 1, 0, 0x43, 0, 7, 0, 2, 4, 0, 0, 0, 0, 0];
+    assert_eq!(response_for(&success, 1, DEFAULT_PROFILE_STATUS), Ok(()));
+    assert_eq!(
+        response_for(&success, 2, DEFAULT_PROFILE_STATUS),
+        Err(Error::WrongTransaction)
+    );
+    assert_eq!(response(&success, 1), Err(Error::MalformedResponse));
+}
+
+#[test]
 fn fixed_wire_vectors_bind_byte_order_and_withdrawal() {
     let network = Connected::new(BSSID, Some(Ipv4Addr::new(192, 0, 2, 1)), None, true).unwrap();
     // Independent vector from IDL TLV tags/widths and stock STA builder offsets.

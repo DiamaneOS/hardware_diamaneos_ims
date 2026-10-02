@@ -23,6 +23,7 @@ format is described by [Qualcomm's QMI framework](https://github.com/qualcomm/qm
 | TLV `0x1f` | Optional uint32 Wi-Fi mode; observed STA value 2 |
 | TLV `0x21` | Optional uint32 connection state; 0 disconnected, 1 not validated, 2 validated |
 | TLV `0x24` | Optional one-byte default-route boolean from Android default-network selection |
+| Default-profile status | Request `0x43`: required uint32 profile0 in TLV `0x01`, optional uint32 state in TLV `0x10`; 0 met, 1 not met |
 | Response | Result-only TLV `0x02`, uint16 result and error |
 
 The stock request has other optional fields. This codec intentionally has no API
@@ -46,7 +47,8 @@ Unknown extensions are rejected until reviewed. `session.rs` adds bounded retrie
 binding (`0x27`, required uint32 TLV1, observed primary1/secondary2). Wi-Fi switch
 reporting uses `0x34`, optional boolean TLV0x13 from the stock initializer. The
 runtime does not advertise unimplemented capabilities or register for optional
-measurement requests.
+measurement requests. It acknowledges the stock default connectivity profile
+alongside STA state, including negative startup reconciliation and withdrawal.
 
 Sensitive observations have no `Debug` or `Display` implementation. Encoded byte
 buffers still contain identifiers; callers must not log or persist them. The
@@ -101,10 +103,30 @@ which can hide the default from callers without INTERNET permission, or hidden
 Connectivity APIs. Replacement defaults clear the old state before new capabilities
 arrive; late capabilities/loss from the old network are ignored. This does not change routes,
 bypass a VPN, or assert successful carrier authentication. Withdrawal explicitly
-sets the flag false. No new permissions, identifiers or WQE reports are added.
+sets the flag false. No new permissions or identifiers are added.
 
 The stock relay uses the default-network callback and transport capabilities to
 recognise Wi-Fi underneath a VPN. The downstream rule is conservative for mixed
-underlays and retains the existing single-Wi-Fi-link restriction. Stock startup
-also considers this flag in a separate WQE message; that message is not implemented
-here. Whether supplying the omitted flag fixes FP6 reconnects requires device tests.
+underlays and retains the existing single-Wi-Fi-link restriction. Stock also
+reports this flag in a separate default-profile message. Whether the complete
+report sequence resolves FP6 reconnects requires device qualification.
+
+## Default connectivity profile
+
+The authenticated FP6.QREL.16.111.0 `libwms.so` default-profile callback checks
+connected state, default-route state and Android validation. It reports profile0
+as met only when all three hold, otherwise not met. The constructor creates and
+starts that fixed default profile with identifier0. This is a connectivity
+indicator, not a bandwidth, signal, latency or carrier-specific QoS measurement.
+
+The source reporter uses the same criterion from its authenticated snapshot.
+Missing, disconnected, unvalidated or non-default observations report not met.
+It never accepts a caller-selected profile, a quality estimate or arbitrary
+modem request bytes. Optional measurement profiles remain unimplemented.
+
+Both STA and default-profile replies must match the current transaction and
+verified modem peer before the session settles. Startup clears both prior states;
+withdrawal clears profile0 as well as STA availability. Loss or replacement while
+a positive update is pending prevents retrying that stale update. Negative replies
+and bounded retry exhaustion fail the session; unsupported firmware is not treated
+as success. The reply uses the existing result-only parser and fixed bounds.

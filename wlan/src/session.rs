@@ -2,8 +2,8 @@
 // Copyright 2026 The DiamaneOS Project
 //! One DSD client's acknowledged lifecycle. The runtime owns peer validation.
 use crate::{
-    bind_subscription, response_for, wifi_switch, withdrawal, Connected, BIND_SUBSCRIPTION,
-    DATA_SETTINGS, WLAN_STATUS,
+    bind_subscription, default_profile_status, response_for, wifi_switch, withdrawal, Connected,
+    BIND_SUBSCRIPTION, DATA_SETTINGS, DEFAULT_PROFILE_STATUS, WLAN_STATUS,
 };
 
 const DEADLINE_MS: u64 = 2_000;
@@ -19,8 +19,10 @@ pub struct Observation {
 enum Step {
     Bind,
     Clear,
+    ClearProfile,
     Switch,
     Status,
+    Profile,
     Idle,
     Failed,
 }
@@ -49,7 +51,7 @@ pub struct Session {
 /// Fixed numeric diagnostics, with no observation or packet data.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Diagnostics {
-    /// Bind, clear, switch, status, settled-down, settled-up, failed.
+    /// Bind, clear, switch, status, settled-down, settled-up, failed, profile.
     pub stage: i32,
     pub operation: u16,
     /// 0: no failure; positive: QMI error; -1: timeout; -2: transaction
@@ -104,6 +106,7 @@ impl Session {
         let stage = match self.step {
             Step::Bind => 0,
             Step::Clear => 1,
+            Step::ClearProfile | Step::Profile => 7,
             Step::Switch => 2,
             Step::Status => 3,
             Step::Idle if self.confirmed.as_ref().is_some_and(|s| s.network.is_some()) => 5,
@@ -126,7 +129,7 @@ impl Session {
             }
             // Never retransmit a connected payload after the observation changed.
             // Keep the old transaction quarantined by moving to a fresh ID.
-            if matches!(self.step, Step::Switch | Step::Status)
+            if matches!(self.step, Step::Switch | Step::Status | Step::Profile)
                 && self.sending.as_ref() != Some(&self.desired)
             {
                 self.pending = None;
@@ -157,6 +160,7 @@ impl Session {
         let (message, packet) = match self.step {
             Step::Bind => (BIND_SUBSCRIPTION, bind_subscription(tx, self.subscription)),
             Step::Clear => (WLAN_STATUS, withdrawal(tx, [0; 6])),
+            Step::ClearProfile => (DEFAULT_PROFILE_STATUS, default_profile_status(tx, false)),
             Step::Switch => {
                 self.sending = Some(self.desired.clone());
                 (DATA_SETTINGS, wifi_switch(tx, self.desired.enabled))
@@ -173,6 +177,23 @@ impl Session {
                     None => withdrawal(tx, self.previous_bssid),
                 };
                 (WLAN_STATUS, packet)
+            }
+            Step::Profile => {
+                // A lost/replaced observation must never gain a stale positive
+                // default-profile update, even after STA acknowledgement.
+                if self.sending.as_ref() != Some(&self.desired) {
+                    self.step = Step::Switch;
+                    return self.poll(now_ms);
+                }
+                let connected_default = self
+                    .sending
+                    .as_ref()
+                    .and_then(|observation| observation.network.as_ref())
+                    .is_some_and(|network| network.validated && network.default_route);
+                (
+                    DEFAULT_PROFILE_STATUS,
+                    default_profile_status(tx, connected_default),
+                )
             }
             _ => return None,
         };
@@ -212,9 +233,11 @@ impl Session {
         self.pending = None;
         self.step = match self.step {
             Step::Bind => Step::Clear,
-            Step::Clear => Step::Switch,
+            Step::Clear => Step::ClearProfile,
+            Step::ClearProfile => Step::Switch,
             Step::Switch => Step::Status,
-            Step::Status => {
+            Step::Status => Step::Profile,
+            Step::Profile => {
                 if let Some(s) = &self.sending {
                     self.previous_bssid = s.network.as_ref().map_or([0; 6], |n| n.bssid);
                 }
