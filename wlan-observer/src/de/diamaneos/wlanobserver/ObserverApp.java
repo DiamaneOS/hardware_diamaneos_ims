@@ -208,6 +208,14 @@ public final class ObserverApp extends Application {
                             + " registration-enabled=" + status.diagnosticRegistrationEnabled
                             + " notifications=" + indicationCounts(status.primaryIndicationHistogram)
                             + "," + indicationCounts(status.secondaryIndicationHistogram);
+                    summary += " keepalive-failure=" + status.primaryKeepaliveFailureSent
+                            + "/" + status.primaryKeepaliveFailureAcknowledged + "/"
+                            + status.primaryKeepaliveFailureError + "/"
+                            + status.primaryKeepaliveFailureDropped + ","
+                            + status.secondaryKeepaliveFailureSent + "/"
+                            + status.secondaryKeepaliveFailureAcknowledged + "/"
+                            + status.secondaryKeepaliveFailureError + "/"
+                            + status.secondaryKeepaliveFailureDropped;
                     if (!summary.equals(lastStatus)) {
                         Log.i("WlanReporting", summary);
                         lastStatus = summary;

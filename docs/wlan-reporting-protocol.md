@@ -149,3 +149,29 @@ withdrawal clears profile0 as well as STA availability. Loss or replacement whil
 a positive update is pending prevents retrying that stale update. Negative replies
 and bounded retry exhaustion fail the session; unsupported firmware is not treated
 as success. The reply uses the existing result-only parser and fixed bounds.
+
+## Keepalive operation failure
+
+The authenticated FP6.QREL.16.111.0 stock handler decodes indication0x41, then sends operation
+status request0x42. A negative local operation result becomes required TLV1,
+uint32 little-endian1; nonnegative results become0. No distinct unsupported enum
+meaning is assumed. This adapter cannot perform either requested operation and
+returns generic failure for structurally valid start and stop instructions.
+
+Accepted indication bodies have the stock47-byte maximum, required one-byte
+operation TLV1 and optional fixed-size IPv4/IPv6, port and timer fields. Unknown
+extensions, duplicates, truncation or wrong framing are rejected. Address, port
+and timer bytes are not interpreted, retained or logged, and no network traffic
+or cancellation success is claimed.
+
+Only a current authenticated, subscription-bound modem context may enqueue a
+completion. Each context retains at most eight queued markers and one pending
+fixed reply. The reply has its own matching-ACK/retry state and shares the core
+session's nonwrapping transaction space. Connectivity reconciliation has priority
+and does not wait for keepalive completion. Each bounded runtime cycle advances
+both deadline machines and sends at most one packet from each channel, with
+connectivity first. Queue overflow and discarded queued completions are counted
+without retaining instruction data. Rejection/timeout blocks this optional
+reply channel until context replacement; transaction exhaustion requires a new
+session. This closes a missing failure contract, not keepalive functionality or
+nondefault quality-profile support. Native carrier effect remains unqualified.

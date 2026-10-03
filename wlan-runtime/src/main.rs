@@ -81,6 +81,14 @@ impl IReporter for Service {
             secondaryLastIndication: s.status.secondaryLastIndication,
             primaryIndicationHistogram: s.status.primaryIndicationHistogram.clone(),
             secondaryIndicationHistogram: s.status.secondaryIndicationHistogram.clone(),
+            primaryKeepaliveFailureSent: s.status.primaryKeepaliveFailureSent,
+            primaryKeepaliveFailureAcknowledged: s.status.primaryKeepaliveFailureAcknowledged,
+            primaryKeepaliveFailureError: s.status.primaryKeepaliveFailureError,
+            secondaryKeepaliveFailureSent: s.status.secondaryKeepaliveFailureSent,
+            secondaryKeepaliveFailureAcknowledged: s.status.secondaryKeepaliveFailureAcknowledged,
+            secondaryKeepaliveFailureError: s.status.secondaryKeepaliveFailureError,
+            primaryKeepaliveFailureDropped: s.status.primaryKeepaliveFailureDropped,
+            secondaryKeepaliveFailureDropped: s.status.secondaryKeepaliveFailureDropped,
         })
     }
     fn registerObserver(&self, lifetime: &SpIBinder) -> binder::Result<i64> {
@@ -292,7 +300,7 @@ impl Client {
             }
         }
         if let Some(peer) = self.endpoint {
-            if let Some(packet) = self.state.poll(now) {
+            for packet in self.state.poll_cycle(now).into_iter().flatten() {
                 self.socket.send(peer, &packet)?;
             }
         }
@@ -381,16 +389,31 @@ fn run() -> io::Result<()> {
             };
             if diagnostics_enabled {
                 let (responses, indications, message) = client.headers.snapshot();
+                let keepalive = client.state.keepalive_diagnostics();
                 if index == 0 {
                     s.status.primaryResponseHeaders = responses;
                     s.status.primaryIndicationHeaders = indications;
                     s.status.primaryLastIndication = message;
                     s.status.primaryIndicationHistogram = client.headers.histogram();
+                    s.status.primaryKeepaliveFailureSent =
+                        keepalive.sent.min(i64::MAX as u64) as i64;
+                    s.status.primaryKeepaliveFailureAcknowledged =
+                        keepalive.acknowledged.min(i64::MAX as u64) as i64;
+                    s.status.primaryKeepaliveFailureError = keepalive.error;
+                    s.status.primaryKeepaliveFailureDropped =
+                        keepalive.dropped.min(i64::MAX as u64) as i64;
                 } else {
                     s.status.secondaryResponseHeaders = responses;
                     s.status.secondaryIndicationHeaders = indications;
                     s.status.secondaryLastIndication = message;
                     s.status.secondaryIndicationHistogram = client.headers.histogram();
+                    s.status.secondaryKeepaliveFailureSent =
+                        keepalive.sent.min(i64::MAX as u64) as i64;
+                    s.status.secondaryKeepaliveFailureAcknowledged =
+                        keepalive.acknowledged.min(i64::MAX as u64) as i64;
+                    s.status.secondaryKeepaliveFailureError = keepalive.error;
+                    s.status.secondaryKeepaliveFailureDropped =
+                        keepalive.dropped.min(i64::MAX as u64) as i64;
                 }
             }
             if index == 0 {
