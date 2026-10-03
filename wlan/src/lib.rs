@@ -19,6 +19,7 @@ pub const DEFAULT_PROFILE_STATUS: u16 = 0x43;
 
 pub mod keepalive;
 pub mod profile_notice;
+pub mod profile_reporting;
 pub mod profiles;
 pub mod session;
 
