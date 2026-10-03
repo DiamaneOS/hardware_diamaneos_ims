@@ -2,8 +2,9 @@
 // Copyright 2026 The DiamaneOS Project
 //! One DSD client's acknowledged lifecycle. The runtime owns peer validation.
 use crate::{
-    bind_subscription, default_profile_status, response_for, wifi_switch, withdrawal, Connected,
-    BIND_SUBSCRIPTION, DATA_SETTINGS, DEFAULT_PROFILE_STATUS, WLAN_STATUS,
+    bind_subscription, default_profile_status, diagnostic_notification_registration, response_for,
+    wifi_switch, withdrawal, Connected, BIND_SUBSCRIPTION, DATA_SETTINGS, DEFAULT_PROFILE_STATUS,
+    INDICATION_REGISTRATION, WLAN_STATUS,
 };
 
 const DEADLINE_MS: u64 = 2_000;
@@ -18,6 +19,7 @@ pub struct Observation {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Step {
     Bind,
+    DiagnosticRegistration,
     Clear,
     ClearProfile,
     Switch,
@@ -40,6 +42,7 @@ struct Pending {
 
 pub struct Session {
     subscription: u32,
+    diagnostic_registration: bool,
     next_transaction: u16,
     step: Step,
     pending: Option<Pending>,
@@ -57,7 +60,8 @@ pub struct Session {
 /// Fixed numeric diagnostics, with no observation or packet data.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Diagnostics {
-    /// Bind, clear, switch, status, settled-down, settled-up, failed, profile.
+    /// Bind, clear, switch, status, settled-down, settled-up, failed, profile;
+    /// private diagnostic registration uses8.
     pub stage: i32,
     pub operation: u16,
     /// 0: no failure; positive: QMI error; -1: timeout; -2: transaction
@@ -69,6 +73,7 @@ impl Session {
     pub fn new(subscription: u32) -> Option<Self> {
         (1..=2).contains(&subscription).then_some(Self {
             subscription,
+            diagnostic_registration: false,
             next_transaction: 1,
             step: Step::Bind,
             pending: None,
@@ -82,6 +87,15 @@ impl Session {
             previous_bssid: [0; 6],
             failed_operation: 0,
             error: 0,
+        })
+    }
+
+    /// Opt-in PRIVATE DIAGNOSTIC, not supported production profile handling.
+    /// Runtime selection requires both a private compile flag and ro.debuggable.
+    pub fn new_with_diagnostic_registration(subscription: u32) -> Option<Self> {
+        Self::new(subscription).map(|mut session| {
+            session.diagnostic_registration = true;
+            session
         })
     }
 
@@ -132,6 +146,7 @@ impl Session {
     pub fn diagnostics(&self) -> Diagnostics {
         let stage = match self.step {
             Step::Bind => 0,
+            Step::DiagnosticRegistration => 8,
             Step::Clear => 1,
             Step::ClearProfile | Step::Profile | Step::WithdrawProfile => 7,
             Step::Switch | Step::WithdrawSwitch => 2,
@@ -216,6 +231,10 @@ impl Session {
         self.next_transaction = next;
         let (message, packet) = match self.step {
             Step::Bind => (BIND_SUBSCRIPTION, bind_subscription(tx, self.subscription)),
+            Step::DiagnosticRegistration => (
+                INDICATION_REGISTRATION,
+                diagnostic_notification_registration(tx),
+            ),
             Step::Clear => (WLAN_STATUS, withdrawal(tx, [0; 6])),
             Step::ClearProfile => (DEFAULT_PROFILE_STATUS, default_profile_status(tx, false)),
             Step::WithdrawProfile => {
@@ -306,7 +325,8 @@ impl Session {
             self.acknowledged_switch = self.sending.as_ref().map(|s| s.enabled);
         }
         self.step = match self.step {
-            Step::Bind => Step::Clear,
+            Step::Bind if self.diagnostic_registration => Step::DiagnosticRegistration,
+            Step::Bind | Step::DiagnosticRegistration => Step::Clear,
             Step::Clear => Step::ClearProfile,
             Step::ClearProfile => self.update_start(),
             // Stock's runtime callback reports the current default profile

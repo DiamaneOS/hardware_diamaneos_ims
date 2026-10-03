@@ -10,6 +10,8 @@ parcelable ReporterStatus {
     int secondaryError;
     // Private userdebug observation only. Zero/-1 on a user build.
     boolean diagnosticHeadersEnabled;
+    // True only with the private registration cfg AND immutable debug-build flag.
+    boolean diagnosticRegistrationEnabled;
     long primaryResponseHeaders;
     long primaryIndicationHeaders;
     int primaryLastIndication = -1;

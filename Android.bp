@@ -48,6 +48,9 @@ rust_library {
 }
 rust_binary {
     name: "wlanreportd", srcs: ["wlan-runtime/src/main.rs"], edition: "2021",
+    // PRIVATE EXPERIMENT ONLY. Runtime also requires immutable ro.debuggable.
+    // Remove this cfg and the diagnostic registration path before publication.
+    cfgs: ["private_dsd_registration"],
     system_ext_specific: true,
     rustlibs: ["libbinder_rs", "liblibc", "librustutils", "libdiamaneos_ims_dcm",
         "libdiamaneos_ims_runtime", "libdiamaneos_wlan_reporting",

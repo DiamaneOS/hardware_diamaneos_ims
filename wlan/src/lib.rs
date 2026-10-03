@@ -12,6 +12,7 @@ pub const DSD_MAJOR_VERSION: u32 = 1;
 pub const WLAN_STATUS: u16 = 0x20;
 pub const BIND_SUBSCRIPTION: u16 = 0x27;
 pub const DATA_SETTINGS: u16 = 0x34;
+pub const INDICATION_REGISTRATION: u16 = 0x38;
 pub const DEFAULT_PROFILE_STATUS: u16 = 0x43;
 
 pub mod session;
@@ -216,6 +217,17 @@ pub fn wifi_switch(transaction: u16, enabled: bool) -> Result<Vec<u8>, Error> {
     request(transaction, DATA_SETTINGS, body)
 }
 
+/// PRIVATE DIAGNOSTIC: the two optional byte fields enabled in both stock
+/// subscription contexts. Their event/service-readiness meaning is not proven.
+/// The source observes headers only; it emits no quality or capability verdict.
+/// Never select this path in a release runtime or accept caller-chosen fields.
+pub fn diagnostic_notification_registration(transaction: u16) -> Result<Vec<u8>, Error> {
+    let mut body = Vec::with_capacity(8);
+    tlv(&mut body, 0x12, &[1]);
+    tlv(&mut body, 0x14, &[1]);
+    request(transaction, INDICATION_REGISTRATION, body)
+}
+
 /// Stock's default connectivity profile only; not a signal/throughput measurement
 /// and never a caller-selected profile. IDL: required uint32 profile, optional
 /// uint32 status (0 met, 1 not met). The stock default profile is always ID 0.
@@ -273,7 +285,11 @@ pub fn response_for(bytes: &[u8], expected_transaction: u16, message: u16) -> Re
     let parsed = Frame::parse(bytes).map_err(|_| Error::MalformedResponse)?;
     if !matches!(
         message,
-        WLAN_STATUS | BIND_SUBSCRIPTION | DATA_SETTINGS | DEFAULT_PROFILE_STATUS
+        WLAN_STATUS
+            | BIND_SUBSCRIPTION
+            | DATA_SETTINGS
+            | INDICATION_REGISTRATION
+            | DEFAULT_PROFILE_STATUS
     ) || parsed.kind != Kind::Response
         || parsed.id != message
     {

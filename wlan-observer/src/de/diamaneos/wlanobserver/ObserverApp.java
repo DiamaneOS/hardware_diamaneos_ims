@@ -205,6 +205,7 @@ public final class ObserverApp extends Application {
                             + "," + status.secondaryResponseHeaders + "/"
                             + status.secondaryIndicationHeaders + "/" + status.secondaryLastIndication;
                     summary += " header-enabled=" + status.diagnosticHeadersEnabled
+                            + " registration-enabled=" + status.diagnosticRegistrationEnabled
                             + " notifications=" + indicationCounts(status.primaryIndicationHistogram)
                             + "," + indicationCounts(status.secondaryIndicationHistogram);
                     if (!summary.equals(lastStatus)) {
