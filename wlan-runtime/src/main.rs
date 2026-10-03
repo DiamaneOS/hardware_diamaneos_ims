@@ -340,8 +340,9 @@ fn run() -> io::Result<()> {
     let mut clients = (1..=slots)
         .map(|s| Client::new(s, node))
         .collect::<io::Result<Vec<_>>>()?;
-    // Handler only stores an atomic flag. Ordinary init stop gets a bounded
-    // withdrawal attempt; SIGKILL/modem failure cannot promise withdrawal.
+    // Handler only stores an atomic flag. SIGTERM/SIGINT gets a bounded
+    // withdrawal attempt. Default init restart uses SIGKILL, which cannot run
+    // this handler; abrupt loss and modem failure cannot promise withdrawal.
     unsafe {
         libc::signal(libc::SIGTERM, stop as *const () as libc::sighandler_t);
         libc::signal(libc::SIGINT, stop as *const () as libc::sighandler_t);
