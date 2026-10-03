@@ -38,7 +38,8 @@ pub struct Diagnostics {
     pub sent: u64,
     pub acknowledged: u64,
     pub dropped: u64,
-    /// 0: no error; positive: QMI error; -1: timeout; -2: transaction exhaustion.
+    /// 0: no error; positive: QMI error; -1: timeout; -2: transaction exhaustion;
+    /// -4: a valid instruction was discarded because the bounded queue was full.
     pub error: i32,
 }
 
@@ -64,6 +65,11 @@ impl Failures {
                 self.queued += 1;
             } else {
                 self.diagnostics.dropped = self.diagnostics.dropped.saturating_add(1);
+                // Preserve an existing terminal error; overflow is a sticky
+                // degradation indication until this modem context is replaced.
+                if !self.blocked && self.diagnostics.error == 0 {
+                    self.diagnostics.error = -4;
+                }
             }
             return true;
         }

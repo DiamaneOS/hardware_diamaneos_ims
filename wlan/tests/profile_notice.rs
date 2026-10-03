@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 use diamaneos_ims_dcm::protocol::{Encoder, Kind};
 use diamaneos_wlan_reporting::profile_notice::Notice;
-use diamaneos_wlan_reporting::session::{Observation, Session};
 
 fn packet(id: u16, fields: &[(u8, &[u8])]) -> Vec<u8> {
     let mut out = Encoder::new(Kind::Indication, 0, id);
@@ -148,72 +147,4 @@ fn optional_fields_have_exact_wire_widths_and_do_not_change_the_result() {
             }
         }
     }
-}
-
-fn acknowledge(session: &mut Session, request: &[u8]) {
-    session.receive(&[
-        2, request[1], request[2], request[3], request[4], 7, 0, 2, 4, 0, 0, 0, 0, 0,
-    ]);
-}
-
-#[test]
-fn private_observations_require_bind_and_do_not_consume_a_pending_control_ack() {
-    let init = packet(0x45, &[(1, &4_u32.to_le_bytes())]);
-    let mut session = Session::new_with_diagnostic_registration(1).unwrap();
-    session.observe(Observation {
-        enabled: false,
-        network: None,
-    });
-    let bind = session.poll(0).unwrap();
-    session.receive(&init);
-    assert_eq!(session.profile_diagnostics().initialization_counts()[0], 0);
-    assert!(session.poll(1).is_none());
-    acknowledge(&mut session, &bind);
-    let registration = session.poll(2).unwrap();
-    session.receive(&init);
-    assert_eq!(session.profile_diagnostics().initialization_counts()[0], 1);
-    assert!(session.poll(3).is_none());
-    acknowledge(&mut session, &registration);
-    assert_eq!(session.poll(4).unwrap()[3], 0x20);
-
-    let mut ordinary = Session::new(1).unwrap();
-    ordinary.observe(Observation {
-        enabled: false,
-        network: None,
-    });
-    let bind = ordinary.poll(0).unwrap();
-    acknowledge(&mut ordinary, &bind);
-    ordinary.receive(&init);
-    assert_eq!(ordinary.profile_diagnostics().initialization_counts()[0], 0);
-}
-
-#[test]
-fn diagnostic_counts_distinguish_zero_selection_repeats_rejection_and_context_reset() {
-    let mut session = Session::new_with_diagnostic_registration(1).unwrap();
-    session.observe(Observation {
-        enabled: false,
-        network: None,
-    });
-    let bind = session.poll(0).unwrap();
-    acknowledge(&mut session, &bind);
-    for _ in 0..1000 {
-        session.receive(&packet(0x45, &[(1, &4_u32.to_le_bytes())]));
-    }
-    session.receive(&packet(0x3f, &[(1, &0_u64.to_le_bytes())]));
-    session.receive(&packet(0x3f, &[(1, &((1_u64 << 32) | 1).to_le_bytes())]));
-    session.receive(&packet(0x45, &[(1, &44_u32.to_le_bytes())]));
-    let counts = session.profile_diagnostics();
-    assert_eq!(counts.initialization_counts()[0], 1000);
-    assert_eq!(counts.selection_counts()[0], 1);
-    assert_eq!(counts.selection_messages, 2);
-    assert_eq!(counts.unmapped_selections, 1);
-    assert_eq!(counts.rejected_messages, 1);
-    assert_eq!(counts.initialization_counts().len(), 40);
-    let replacement = Session::new_with_diagnostic_registration(1).unwrap();
-    assert!(replacement
-        .profile_diagnostics()
-        .initialization_counts()
-        .iter()
-        .all(|v| *v == 0));
-    assert_eq!(replacement.profile_diagnostics().selection_messages, 0);
 }

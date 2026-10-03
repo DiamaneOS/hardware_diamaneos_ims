@@ -3,8 +3,6 @@
 #![forbid(unsafe_code)]
 use diamaneos_wlan_reporting::session::Observation;
 
-pub mod header_diagnostics;
-
 #[derive(Default)]
 pub struct Observations {
     generation: u64,

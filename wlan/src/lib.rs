@@ -223,11 +223,9 @@ pub fn wifi_switch(transaction: u16, enabled: bool) -> Result<Vec<u8>, Error> {
     request(transaction, DATA_SETTINGS, body)
 }
 
-/// PRIVATE DIAGNOSTIC: the two optional byte fields enabled in both stock
-/// subscription contexts. Their event/service-readiness meaning is not proven.
-/// The source observes headers only; it emits no quality or capability verdict.
-/// Never select this path in a release runtime or accept caller-chosen fields.
-pub fn diagnostic_notification_registration(transaction: u16) -> Result<Vec<u8>, Error> {
+/// Register the stock notification subset required to complete the modem's
+/// profile and keepalive instructions. No QoE capability is advertised.
+pub fn notification_registration(transaction: u16) -> Result<Vec<u8>, Error> {
     let mut body = Vec::with_capacity(8);
     tlv(&mut body, 0x12, &[1]);
     tlv(&mut body, 0x14, &[1]);

@@ -73,45 +73,10 @@ impl IReporter for Service {
             secondaryStage: s.status.secondaryStage,
             secondaryOperation: s.status.secondaryOperation,
             secondaryError: s.status.secondaryError,
-            diagnosticHeadersEnabled: s.status.diagnosticHeadersEnabled,
-            diagnosticRegistrationEnabled: s.status.diagnosticRegistrationEnabled,
-            primaryResponseHeaders: s.status.primaryResponseHeaders,
-            primaryIndicationHeaders: s.status.primaryIndicationHeaders,
-            primaryLastIndication: s.status.primaryLastIndication,
-            secondaryResponseHeaders: s.status.secondaryResponseHeaders,
-            secondaryIndicationHeaders: s.status.secondaryIndicationHeaders,
-            secondaryLastIndication: s.status.secondaryLastIndication,
-            primaryIndicationHistogram: s.status.primaryIndicationHistogram.clone(),
-            secondaryIndicationHistogram: s.status.secondaryIndicationHistogram.clone(),
-            primaryKeepaliveFailureSent: s.status.primaryKeepaliveFailureSent,
-            primaryKeepaliveFailureAcknowledged: s.status.primaryKeepaliveFailureAcknowledged,
-            primaryKeepaliveFailureError: s.status.primaryKeepaliveFailureError,
-            secondaryKeepaliveFailureSent: s.status.secondaryKeepaliveFailureSent,
-            secondaryKeepaliveFailureAcknowledged: s.status.secondaryKeepaliveFailureAcknowledged,
-            secondaryKeepaliveFailureError: s.status.secondaryKeepaliveFailureError,
-            primaryKeepaliveFailureDropped: s.status.primaryKeepaliveFailureDropped,
-            secondaryKeepaliveFailureDropped: s.status.secondaryKeepaliveFailureDropped,
-            primaryProfileInitializationCounts: s.status.primaryProfileInitializationCounts.clone(),
-            secondaryProfileInitializationCounts: s
-                .status
-                .secondaryProfileInitializationCounts
-                .clone(),
-            primaryProfileSelectionCounts: s.status.primaryProfileSelectionCounts.clone(),
-            secondaryProfileSelectionCounts: s.status.secondaryProfileSelectionCounts.clone(),
-            primaryProfileSelectionMessages: s.status.primaryProfileSelectionMessages,
-            secondaryProfileSelectionMessages: s.status.secondaryProfileSelectionMessages,
-            primaryProfileRejectedMessages: s.status.primaryProfileRejectedMessages,
-            secondaryProfileRejectedMessages: s.status.secondaryProfileRejectedMessages,
-            primaryProfileUnmappedSelections: s.status.primaryProfileUnmappedSelections,
-            secondaryProfileUnmappedSelections: s.status.secondaryProfileUnmappedSelections,
-            primaryProfileReportsSent: s.status.primaryProfileReportsSent,
-            primaryProfileReportsAcknowledged: s.status.primaryProfileReportsAcknowledged,
-            primaryProfileReportsCancelled: s.status.primaryProfileReportsCancelled,
-            primaryProfileReportsError: s.status.primaryProfileReportsError,
-            secondaryProfileReportsSent: s.status.secondaryProfileReportsSent,
-            secondaryProfileReportsAcknowledged: s.status.secondaryProfileReportsAcknowledged,
-            secondaryProfileReportsCancelled: s.status.secondaryProfileReportsCancelled,
-            secondaryProfileReportsError: s.status.secondaryProfileReportsError,
+            primaryKeepaliveError: s.status.primaryKeepaliveError,
+            secondaryKeepaliveError: s.status.secondaryKeepaliveError,
+            primaryProfileError: s.status.primaryProfileError,
+            secondaryProfileError: s.status.secondaryProfileError,
         })
     }
     fn registerObserver(&self, lifetime: &SpIBinder) -> binder::Result<i64> {
@@ -210,11 +175,9 @@ struct Client {
     retry_at: u64,
     failures: u8,
     last_observation: Option<Observation>,
-    diagnostics_enabled: bool,
-    headers: diamaneos_wlan_runtime::header_diagnostics::HeaderDiagnostics,
 }
 impl Client {
-    fn new(subscription: u32, node: u32, diagnostics_enabled: bool) -> io::Result<Self> {
+    fn new(subscription: u32, node: u32) -> io::Result<Self> {
         let socket = Qrtr::bind()?;
         if socket.local().node == node {
             return Err(io::Error::other("local modem node"));
@@ -233,33 +196,25 @@ impl Client {
         Ok(Self {
             socket,
             endpoint: None,
-            state: if cfg!(private_dsd_registration) && diagnostics_enabled {
+            state: {
                 let generation = NEXT_PROFILE_CONTEXT
                     .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
                         value.checked_add(1)
                     })
                     .map_err(|_| io::Error::other("profile context exhausted"))?;
-                Session::new_with_diagnostic_profile_reporting(subscription, generation)
+                Session::new(subscription, generation)
                     .ok_or_else(|| io::Error::other("profile context invalid"))?
-            } else {
-                Session::new(subscription).unwrap()
             },
             subscription,
             retry_at: 0,
             failures: 0,
             last_observation: None,
-            diagnostics_enabled,
-            headers: Default::default(),
         })
     }
 
     fn reconnect(&mut self, node: u32) -> io::Result<()> {
-        let next = Self::new(self.subscription, node, self.diagnostics_enabled)?;
-        let headers = self.headers;
+        let next = Self::new(self.subscription, node)?;
         *self = next;
-        {
-            self.headers = headers;
-        }
         Ok(())
     }
     fn step(&mut self, node: u32, observation: &Observation, now: u64) -> io::Result<()> {
@@ -322,9 +277,6 @@ impl Client {
                     }
                 }
             } else if Some(peer) == self.endpoint {
-                if self.diagnostics_enabled {
-                    self.headers.observe(&bytes);
-                }
                 self.state.receive(&bytes);
             }
         }
@@ -357,19 +309,12 @@ fn run() -> io::Result<()> {
         return Err(io::Error::other("unsupported slots"));
     }
     let origin = Instant::now();
-    // Immutable build flag; a property read failure disables observation.
-    let diagnostics_enabled =
-        rustutils::android::system_properties::read_bool("ro.debuggable", false).unwrap_or(false);
     let shared = Arc::new(Mutex::new(Shared {
         observations: Observations::default(),
         uid: None,
         death: None,
         lifetime: None,
-        status: ReporterStatus {
-            diagnosticHeadersEnabled: diagnostics_enabled,
-            diagnosticRegistrationEnabled: cfg!(private_dsd_registration) && diagnostics_enabled,
-            ..Default::default()
-        },
+        status: ReporterStatus::default(),
     }));
     let service = BnReporter::new_binder(
         Service {
@@ -384,7 +329,7 @@ fn run() -> io::Result<()> {
     binder::add_service(SERVICE, service.as_binder())
         .map_err(|_| io::Error::other("service registration"))?;
     let mut clients = (1..=slots)
-        .map(|s| Client::new(s, node, diagnostics_enabled))
+        .map(|s| Client::new(s, node))
         .collect::<io::Result<Vec<_>>>()?;
     // Handler only stores an atomic flag. Ordinary init stop gets a bounded
     // withdrawal attempt; SIGKILL/modem failure cannot promise withdrawal.
@@ -416,95 +361,19 @@ fn run() -> io::Result<()> {
             } else {
                 d.stage
             };
-            if diagnostics_enabled {
-                let (responses, indications, message) = client.headers.snapshot();
-                let keepalive = client.state.keepalive_diagnostics();
-                let profile = client.state.profile_diagnostics();
-                let reports = client.state.profile_report_diagnostics();
-                if index == 0 {
-                    s.status.primaryResponseHeaders = responses;
-                    s.status.primaryIndicationHeaders = indications;
-                    s.status.primaryLastIndication = message;
-                    s.status.primaryIndicationHistogram = client.headers.histogram();
-                    s.status.primaryKeepaliveFailureSent =
-                        keepalive.sent.min(i64::MAX as u64) as i64;
-                    s.status.primaryKeepaliveFailureAcknowledged =
-                        keepalive.acknowledged.min(i64::MAX as u64) as i64;
-                    s.status.primaryKeepaliveFailureError = keepalive.error;
-                    s.status.primaryKeepaliveFailureDropped =
-                        keepalive.dropped.min(i64::MAX as u64) as i64;
-                    if s.status.diagnosticRegistrationEnabled {
-                        s.status.primaryProfileInitializationCounts = profile
-                            .initialization_counts()
-                            .iter()
-                            .map(|v| (*v).min(i32::MAX as u32) as i32)
-                            .collect();
-                        s.status.primaryProfileSelectionCounts = profile
-                            .selection_counts()
-                            .iter()
-                            .map(|v| (*v).min(i32::MAX as u32) as i32)
-                            .collect();
-                        s.status.primaryProfileSelectionMessages =
-                            i64::from(profile.selection_messages);
-                        s.status.primaryProfileRejectedMessages =
-                            i64::from(profile.rejected_messages);
-                        s.status.primaryProfileUnmappedSelections =
-                            i64::from(profile.unmapped_selections);
-                        s.status.primaryProfileReportsSent =
-                            reports.sent.min(i64::MAX as u64) as i64;
-                        s.status.primaryProfileReportsAcknowledged =
-                            reports.acknowledged.min(i64::MAX as u64) as i64;
-                        s.status.primaryProfileReportsCancelled =
-                            reports.cancelled.min(i64::MAX as u64) as i64;
-                        s.status.primaryProfileReportsError = reports.error;
-                    }
-                } else {
-                    s.status.secondaryResponseHeaders = responses;
-                    s.status.secondaryIndicationHeaders = indications;
-                    s.status.secondaryLastIndication = message;
-                    s.status.secondaryIndicationHistogram = client.headers.histogram();
-                    s.status.secondaryKeepaliveFailureSent =
-                        keepalive.sent.min(i64::MAX as u64) as i64;
-                    s.status.secondaryKeepaliveFailureAcknowledged =
-                        keepalive.acknowledged.min(i64::MAX as u64) as i64;
-                    s.status.secondaryKeepaliveFailureError = keepalive.error;
-                    s.status.secondaryKeepaliveFailureDropped =
-                        keepalive.dropped.min(i64::MAX as u64) as i64;
-                    if s.status.diagnosticRegistrationEnabled {
-                        s.status.secondaryProfileInitializationCounts = profile
-                            .initialization_counts()
-                            .iter()
-                            .map(|v| (*v).min(i32::MAX as u32) as i32)
-                            .collect();
-                        s.status.secondaryProfileSelectionCounts = profile
-                            .selection_counts()
-                            .iter()
-                            .map(|v| (*v).min(i32::MAX as u32) as i32)
-                            .collect();
-                        s.status.secondaryProfileSelectionMessages =
-                            i64::from(profile.selection_messages);
-                        s.status.secondaryProfileRejectedMessages =
-                            i64::from(profile.rejected_messages);
-                        s.status.secondaryProfileUnmappedSelections =
-                            i64::from(profile.unmapped_selections);
-                        s.status.secondaryProfileReportsSent =
-                            reports.sent.min(i64::MAX as u64) as i64;
-                        s.status.secondaryProfileReportsAcknowledged =
-                            reports.acknowledged.min(i64::MAX as u64) as i64;
-                        s.status.secondaryProfileReportsCancelled =
-                            reports.cancelled.min(i64::MAX as u64) as i64;
-                        s.status.secondaryProfileReportsError = reports.error;
-                    }
-                }
-            }
+
             if index == 0 {
                 s.status.primaryStage = stage;
                 s.status.primaryOperation = i32::from(d.operation);
                 s.status.primaryError = d.error;
+                s.status.primaryKeepaliveError = client.state.keepalive_diagnostics().error;
+                s.status.primaryProfileError = client.state.profile_report_diagnostics().error;
             } else {
                 s.status.secondaryStage = stage;
                 s.status.secondaryOperation = i32::from(d.operation);
                 s.status.secondaryError = d.error;
+                s.status.secondaryKeepaliveError = client.state.keepalive_diagnostics().error;
+                s.status.secondaryProfileError = client.state.profile_report_diagnostics().error;
             }
         }
         drop(s);

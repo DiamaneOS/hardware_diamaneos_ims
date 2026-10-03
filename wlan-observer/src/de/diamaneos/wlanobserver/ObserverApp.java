@@ -200,44 +200,9 @@ public final class ObserverApp extends Application {
                             + "/" + status.primaryOperation
                             + "/" + status.primaryError + " secondary=" + status.secondaryStage
                             + "/" + status.secondaryOperation + "/" + status.secondaryError;
-                    summary += " headers=" + status.primaryResponseHeaders + "/"
-                            + status.primaryIndicationHeaders + "/" + status.primaryLastIndication
-                            + "," + status.secondaryResponseHeaders + "/"
-                            + status.secondaryIndicationHeaders + "/" + status.secondaryLastIndication;
-                    summary += " header-enabled=" + status.diagnosticHeadersEnabled
-                            + " registration-enabled=" + status.diagnosticRegistrationEnabled
-                            + " notifications=" + indicationCounts(status.primaryIndicationHistogram)
-                            + "," + indicationCounts(status.secondaryIndicationHistogram);
-                    summary += " keepalive-failure=" + status.primaryKeepaliveFailureSent
-                            + "/" + status.primaryKeepaliveFailureAcknowledged + "/"
-                            + status.primaryKeepaliveFailureError + "/"
-                            + status.primaryKeepaliveFailureDropped + ","
-                            + status.secondaryKeepaliveFailureSent + "/"
-                            + status.secondaryKeepaliveFailureAcknowledged + "/"
-                            + status.secondaryKeepaliveFailureError + "/"
-                            + status.secondaryKeepaliveFailureDropped;
-                    if (status.diagnosticRegistrationEnabled) {
-                        summary += " profile-init-observed="
-                                + profileCounts(status.primaryProfileInitializationCounts) + ","
-                                + profileCounts(status.secondaryProfileInitializationCounts)
-                                + " profile-select-observed="
-                                + profileCounts(status.primaryProfileSelectionCounts) + ","
-                                + profileCounts(status.secondaryProfileSelectionCounts)
-                                + " profile-selection-messages=" + status.primaryProfileSelectionMessages
-                                + "/" + status.secondaryProfileSelectionMessages
-                                + " profile-rejected=" + status.primaryProfileRejectedMessages
-                                + "/" + status.secondaryProfileRejectedMessages
-                                + " profile-unmapped=" + status.primaryProfileUnmappedSelections
-                                + "/" + status.secondaryProfileUnmappedSelections;
-                        summary += " profile-reports=" + status.primaryProfileReportsSent
-                                + "/" + status.primaryProfileReportsAcknowledged
-                                + "/" + status.primaryProfileReportsError
-                                + "/" + status.primaryProfileReportsCancelled + ","
-                                + status.secondaryProfileReportsSent
-                                + "/" + status.secondaryProfileReportsAcknowledged
-                                + "/" + status.secondaryProfileReportsError
-                                + "/" + status.secondaryProfileReportsCancelled;
-                    }
+                    summary += " optional-errors=" + status.primaryKeepaliveError + "/"
+                            + status.primaryProfileError + "," + status.secondaryKeepaliveError
+                            + "/" + status.secondaryProfileError;
                     if (!summary.equals(lastStatus)) {
                         Log.i("WlanReporting", summary);
                         lastStatus = summary;
@@ -258,26 +223,4 @@ public final class ObserverApp extends Application {
         }
     }
 
-    private static String indicationCounts(int[] values) {
-        if (values == null || values.length != 64) return "unavailable";
-        StringBuilder text = new StringBuilder();
-        for (int index = 0; index < values.length; index++) {
-            if (values[index] == 0) continue;
-            if (text.length() != 0) text.append(';');
-            text.append(Integer.toHexString(index + 0x20)).append(':').append(values[index]);
-        }
-        return text.length() == 0 ? "none" : text.toString();
-    }
-
-    private static String profileCounts(int[] values) {
-        if (values == null || values.length != 40) return "unavailable";
-        StringBuilder text = new StringBuilder();
-        for (int index = 0; index < values.length; index++) {
-            if (values[index] < 0) return "unavailable";
-            if (values[index] == 0) continue;
-            if (text.length() != 0) text.append(';');
-            text.append(index + 4).append(':').append(values[index]);
-        }
-        return text.length() == 0 ? "none" : text.toString();
-    }
 }

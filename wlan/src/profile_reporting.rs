@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The DiamaneOS Project
-//! Private unavailable-measurement transport state. No positive quality policy.
+//! Bounded unavailable-measurement transport state. No positive quality policy.
 use crate::{
     profiles::{Registry, ReportToken},
     response_for, Error, DEFAULT_PROFILE_STATUS,

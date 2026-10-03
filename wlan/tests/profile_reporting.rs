@@ -36,7 +36,7 @@ fn connected() -> Observation {
     }
 }
 fn ready() -> Session {
-    let mut s = Session::new_with_diagnostic_profile_reporting(1, 7).unwrap();
+    let mut s = Session::new(1, 7).unwrap();
     s.observe(connected());
     for id in [0x27, 0x38, 0x20, 0x43, 0x34, 0x43, 0x20] {
         let p = s.poll(0).unwrap();
@@ -149,17 +149,9 @@ fn rejection_and_unsupported_lifecycle_block_only_optional_reporting() {
 }
 
 #[test]
-fn unbound_and_ordinary_sessions_cannot_create_profile_reports() {
-    let mut unbound = Session::new_with_diagnostic_profile_reporting(1, 7).unwrap();
+fn unbound_sessions_cannot_create_profile_reports() {
+    let mut unbound = Session::new(1, 7).unwrap();
     unbound.observe(connected());
     request(&mut unbound);
     assert!(unbound.poll_cycle(0)[2].is_none());
-    let mut ordinary = Session::new(1).unwrap();
-    ordinary.observe(connected());
-    for _ in 0..6 {
-        let p = ordinary.poll(0).unwrap();
-        ordinary.receive(&ack(&p));
-    }
-    request(&mut ordinary);
-    assert!(ordinary.poll_cycle(0)[2].is_none());
 }

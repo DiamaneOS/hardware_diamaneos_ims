@@ -155,18 +155,24 @@ attempt sequence; it does not bypass the delay or the acknowledgement checks.
 On debuggable builds, the observer queries `getStatus` through its authenticated, generation-bound
 Binder connection. The reporter returns fixed numeric progress for the two modem
 contexts, with no BSSID, IP address, network handle, packet bytes or SIM identity.
-The observer emits only changed status via Android Log. Release builds omit this
-polling and lifecycle trace. Diagnostic-query failures do not invalidate an
+The observer emits only changed status via Android Log. The paired status has
+ten integers: stage, operation and core error for each context, plus keepalive
+and profile-channel errors for each context. Release observers omit this polling;
+there are no lifecycle traces, histograms or exported traffic counters.
+Diagnostic-query failures do not invalidate an
 already delivered observation. The reporter's socket
 seccomp filter is not widened for logging; init routes its standard error to
 `/dev/null`, so stderr is not evidence of device progress.
 
 Stages are -1 (no endpoint/observation yet), 0 (bind), 1 (startup clear), 2 (switch),
 3 (STA status), 4 (acknowledged unavailable), 5 (acknowledged available), 6 (failed),
-and 7 (default connectivity profile). Settled states require both acknowledgements.
+7 (default connectivity profile), and 8 (notification registration). Settled
+states require both connectivity acknowledgements.
 Operation is the pending or failed message ID. Error0 means no recorded failure,
 positive values are QMI errors, -1 is timeout, -2 transaction exhaustion, and -3
-local encoding failure. Status is sampled asynchronously; it does not establish
+local encoding failure. Keepalive error -4 records a discarded valid instruction
+at queue capacity; it stays visible until context replacement, without blocking
+core connectivity. Status is sampled asynchronously; it does not establish
 IMS registration or call acceptance. An unavailable diagnostic connection cannot
 renew an observation lease. Both endpoints and their generated interface libraries
 must be updated together as part of the coherent OS build.
