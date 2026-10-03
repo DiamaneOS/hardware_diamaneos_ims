@@ -44,6 +44,7 @@ pub struct Session {
     subscription: u32,
     bound: bool,
     keepalive_failures: crate::keepalive::Failures,
+    profile_notices: crate::profile_notice::Counters,
     diagnostic_registration: bool,
     next_transaction: u16,
     step: Step,
@@ -77,6 +78,7 @@ impl Session {
             subscription,
             bound: false,
             keepalive_failures: Default::default(),
+            profile_notices: Default::default(),
             diagnostic_registration: false,
             next_transaction: 1,
             step: Step::Bind,
@@ -168,6 +170,10 @@ impl Session {
 
     pub fn keepalive_diagnostics(&self) -> crate::keepalive::Diagnostics {
         self.keepalive_failures.diagnostics()
+    }
+
+    pub fn profile_diagnostics(&self) -> &crate::profile_notice::Counters {
+        &self.profile_notices
     }
 
     /// Retries preserve transaction and payload. Exhaustion requires a fresh
@@ -345,6 +351,9 @@ impl Session {
     /// Malformed/unrelated packets cannot consume the pending request. A valid
     /// negative result does consume it and fails this session explicitly.
     pub fn receive(&mut self, bytes: &[u8]) {
+        if self.bound && self.diagnostic_registration && self.profile_notices.observe(bytes) {
+            return;
+        }
         if self.bound && self.keepalive_failures.receive(bytes) {
             return;
         }

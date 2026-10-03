@@ -30,4 +30,16 @@ parcelable ReporterStatus {
     int secondaryKeepaliveFailureError;
     long primaryKeepaliveFailureDropped;
     long secondaryKeepaliveFailureDropped;
+    // Private compile/debug gated observations only. Fixed40 bins for types4..43.
+    // These are NOT active/accepted profiles; identities and repeats collapse.
+    int[] primaryProfileInitializationCounts;
+    int[] secondaryProfileInitializationCounts;
+    int[] primaryProfileSelectionCounts;
+    int[] secondaryProfileSelectionCounts;
+    long primaryProfileSelectionMessages;
+    long secondaryProfileSelectionMessages;
+    long primaryProfileRejectedMessages;
+    long secondaryProfileRejectedMessages;
+    long primaryProfileUnmappedSelections;
+    long secondaryProfileUnmappedSelections;
 }

@@ -89,6 +89,19 @@ impl IReporter for Service {
             secondaryKeepaliveFailureError: s.status.secondaryKeepaliveFailureError,
             primaryKeepaliveFailureDropped: s.status.primaryKeepaliveFailureDropped,
             secondaryKeepaliveFailureDropped: s.status.secondaryKeepaliveFailureDropped,
+            primaryProfileInitializationCounts: s.status.primaryProfileInitializationCounts.clone(),
+            secondaryProfileInitializationCounts: s
+                .status
+                .secondaryProfileInitializationCounts
+                .clone(),
+            primaryProfileSelectionCounts: s.status.primaryProfileSelectionCounts.clone(),
+            secondaryProfileSelectionCounts: s.status.secondaryProfileSelectionCounts.clone(),
+            primaryProfileSelectionMessages: s.status.primaryProfileSelectionMessages,
+            secondaryProfileSelectionMessages: s.status.secondaryProfileSelectionMessages,
+            primaryProfileRejectedMessages: s.status.primaryProfileRejectedMessages,
+            secondaryProfileRejectedMessages: s.status.secondaryProfileRejectedMessages,
+            primaryProfileUnmappedSelections: s.status.primaryProfileUnmappedSelections,
+            secondaryProfileUnmappedSelections: s.status.secondaryProfileUnmappedSelections,
         })
     }
     fn registerObserver(&self, lifetime: &SpIBinder) -> binder::Result<i64> {
@@ -390,6 +403,7 @@ fn run() -> io::Result<()> {
             if diagnostics_enabled {
                 let (responses, indications, message) = client.headers.snapshot();
                 let keepalive = client.state.keepalive_diagnostics();
+                let profile = client.state.profile_diagnostics();
                 if index == 0 {
                     s.status.primaryResponseHeaders = responses;
                     s.status.primaryIndicationHeaders = indications;
@@ -402,6 +416,24 @@ fn run() -> io::Result<()> {
                     s.status.primaryKeepaliveFailureError = keepalive.error;
                     s.status.primaryKeepaliveFailureDropped =
                         keepalive.dropped.min(i64::MAX as u64) as i64;
+                    if s.status.diagnosticRegistrationEnabled {
+                        s.status.primaryProfileInitializationCounts = profile
+                            .initialization_counts()
+                            .iter()
+                            .map(|v| (*v).min(i32::MAX as u32) as i32)
+                            .collect();
+                        s.status.primaryProfileSelectionCounts = profile
+                            .selection_counts()
+                            .iter()
+                            .map(|v| (*v).min(i32::MAX as u32) as i32)
+                            .collect();
+                        s.status.primaryProfileSelectionMessages =
+                            i64::from(profile.selection_messages);
+                        s.status.primaryProfileRejectedMessages =
+                            i64::from(profile.rejected_messages);
+                        s.status.primaryProfileUnmappedSelections =
+                            i64::from(profile.unmapped_selections);
+                    }
                 } else {
                     s.status.secondaryResponseHeaders = responses;
                     s.status.secondaryIndicationHeaders = indications;
@@ -414,6 +446,24 @@ fn run() -> io::Result<()> {
                     s.status.secondaryKeepaliveFailureError = keepalive.error;
                     s.status.secondaryKeepaliveFailureDropped =
                         keepalive.dropped.min(i64::MAX as u64) as i64;
+                    if s.status.diagnosticRegistrationEnabled {
+                        s.status.secondaryProfileInitializationCounts = profile
+                            .initialization_counts()
+                            .iter()
+                            .map(|v| (*v).min(i32::MAX as u32) as i32)
+                            .collect();
+                        s.status.secondaryProfileSelectionCounts = profile
+                            .selection_counts()
+                            .iter()
+                            .map(|v| (*v).min(i32::MAX as u32) as i32)
+                            .collect();
+                        s.status.secondaryProfileSelectionMessages =
+                            i64::from(profile.selection_messages);
+                        s.status.secondaryProfileRejectedMessages =
+                            i64::from(profile.rejected_messages);
+                        s.status.secondaryProfileUnmappedSelections =
+                            i64::from(profile.unmapped_selections);
+                    }
                 }
             }
             if index == 0 {

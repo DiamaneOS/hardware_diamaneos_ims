@@ -179,8 +179,9 @@ nondefault quality-profile support. Native carrier effect remains unqualified.
 ## Profile notification observations
 
 The pure `profile_notice` decoder validates the authenticated FP6.QREL.16.111.0
-DSD initialization indication `0x45` and selection indication `0x3f`. It is not
-connected to the runtime and sends no request or quality result. These messages
+DSD initialization indication `0x45` and selection indication `0x3f`. The runtime
+uses it only for private compile/debug gated observations in a current bound
+subscription context. It sends no request or quality result. These messages
 are separate from the fixed default connectivity profile.
 
 Initialization has a required little-endian uint32 type, observed types4–43,
@@ -207,3 +208,15 @@ that identity, so its output must not be used as a profile registry or to send a
 result. A future implementation needs bounded, private identity/lifecycle handling
 and qualified measurements before adding that behavior. The caller must establish
 the current bound modem endpoint before consuming any observation.
+
+Private status exposes fixed40-bin saturating counts for types4–43, labelled
+initialization type observed and selection bit observed. It also counts valid
+selection messages, including zero masks, rejected notifications and selection
+messages containing unmapped bits. Rejection can mean an unsupported type/field
+as well as malformed framing; it is not an assertion that firmware is faulty.
+Counters reset when the QRTR client/context is replaced, not on each Wi-Fi
+observation. No measurement identity or threshold is available through status.
+Repeated messages and different measurement contexts collapse; counts must never
+drive a quality response or establish active/accepted profile state. Types/counts
+still disclose limited modem policy/activity. Release builds omit status logging,
+and ordinary sessions do not collect these private profile observations.
