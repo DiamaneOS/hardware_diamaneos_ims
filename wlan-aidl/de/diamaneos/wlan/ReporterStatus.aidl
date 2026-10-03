@@ -8,4 +8,15 @@ parcelable ReporterStatus {
     int secondaryStage = -1;
     int secondaryOperation;
     int secondaryError;
+    // Private userdebug observation only. Zero/-1 on a user build.
+    boolean diagnosticHeadersEnabled;
+    long primaryResponseHeaders;
+    long primaryIndicationHeaders;
+    int primaryLastIndication = -1;
+    long secondaryResponseHeaders;
+    long secondaryIndicationHeaders;
+    int secondaryLastIndication = -1;
+    // Fixed producer bounds:64 bins for message IDs0x20..0x5f; empty when disabled.
+    int[] primaryIndicationHistogram;
+    int[] secondaryIndicationHistogram;
 }

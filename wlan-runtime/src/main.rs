@@ -71,6 +71,15 @@ impl IReporter for Service {
             secondaryStage: s.status.secondaryStage,
             secondaryOperation: s.status.secondaryOperation,
             secondaryError: s.status.secondaryError,
+            diagnosticHeadersEnabled: s.status.diagnosticHeadersEnabled,
+            primaryResponseHeaders: s.status.primaryResponseHeaders,
+            primaryIndicationHeaders: s.status.primaryIndicationHeaders,
+            primaryLastIndication: s.status.primaryLastIndication,
+            secondaryResponseHeaders: s.status.secondaryResponseHeaders,
+            secondaryIndicationHeaders: s.status.secondaryIndicationHeaders,
+            secondaryLastIndication: s.status.secondaryLastIndication,
+            primaryIndicationHistogram: s.status.primaryIndicationHistogram.clone(),
+            secondaryIndicationHistogram: s.status.secondaryIndicationHistogram.clone(),
         })
     }
     fn registerObserver(&self, lifetime: &SpIBinder) -> binder::Result<i64> {
@@ -169,9 +178,11 @@ struct Client {
     retry_at: u64,
     failures: u8,
     last_observation: Option<Observation>,
+    diagnostics_enabled: bool,
+    headers: diamaneos_wlan_runtime::header_diagnostics::HeaderDiagnostics,
 }
 impl Client {
-    fn new(subscription: u32, node: u32) -> io::Result<Self> {
+    fn new(subscription: u32, node: u32, diagnostics_enabled: bool) -> io::Result<Self> {
         let socket = Qrtr::bind()?;
         if socket.local().node == node {
             return Err(io::Error::other("local modem node"));
@@ -195,7 +206,19 @@ impl Client {
             retry_at: 0,
             failures: 0,
             last_observation: None,
+            diagnostics_enabled,
+            headers: Default::default(),
         })
+    }
+
+    fn reconnect(&mut self, node: u32) -> io::Result<()> {
+        let next = Self::new(self.subscription, node, self.diagnostics_enabled)?;
+        let headers = self.headers;
+        *self = next;
+        {
+            self.headers = headers;
+        }
+        Ok(())
     }
     fn step(&mut self, node: u32, observation: &Observation, now: u64) -> io::Result<()> {
         if self.last_observation.as_ref() != Some(observation) {
@@ -208,7 +231,7 @@ impl Client {
             }
             if now >= self.retry_at && self.failures < 3 {
                 let failures = self.failures + 1;
-                *self = Self::new(self.subscription, node)?;
+                self.reconnect(node)?;
                 self.failures = failures;
                 self.last_observation = Some(observation.clone());
             }
@@ -252,11 +275,14 @@ impl Client {
                                     port: c.words[3],
                                 });
                     if gone {
-                        *self = Self::new(self.subscription, node)?;
+                        self.reconnect(node)?;
                         break;
                     }
                 }
             } else if Some(peer) == self.endpoint {
+                if self.diagnostics_enabled {
+                    self.headers.observe(&bytes);
+                }
                 self.state.receive(&bytes);
             }
         }
@@ -289,12 +315,18 @@ fn run() -> io::Result<()> {
         return Err(io::Error::other("unsupported slots"));
     }
     let origin = Instant::now();
+    // Immutable build flag; a property read failure disables observation.
+    let diagnostics_enabled =
+        rustutils::system_properties::read_bool("ro.debuggable", false).unwrap_or(false);
     let shared = Arc::new(Mutex::new(Shared {
         observations: Observations::default(),
         uid: None,
         death: None,
         lifetime: None,
-        status: ReporterStatus::default(),
+        status: ReporterStatus {
+            diagnosticHeadersEnabled: diagnostics_enabled,
+            ..Default::default()
+        },
     }));
     let service = BnReporter::new_binder(
         Service {
@@ -309,7 +341,7 @@ fn run() -> io::Result<()> {
     binder::add_service(SERVICE, service.as_binder())
         .map_err(|_| io::Error::other("service registration"))?;
     let mut clients = (1..=slots)
-        .map(|s| Client::new(s, node))
+        .map(|s| Client::new(s, node, diagnostics_enabled))
         .collect::<io::Result<Vec<_>>>()?;
     // Handler only stores an atomic flag. Ordinary init stop gets a bounded
     // withdrawal attempt; SIGKILL/modem failure cannot promise withdrawal.
@@ -341,6 +373,20 @@ fn run() -> io::Result<()> {
             } else {
                 d.stage
             };
+            if diagnostics_enabled {
+                let (responses, indications, message) = client.headers.snapshot();
+                if index == 0 {
+                    s.status.primaryResponseHeaders = responses;
+                    s.status.primaryIndicationHeaders = indications;
+                    s.status.primaryLastIndication = message;
+                    s.status.primaryIndicationHistogram = client.headers.histogram();
+                } else {
+                    s.status.secondaryResponseHeaders = responses;
+                    s.status.secondaryIndicationHeaders = indications;
+                    s.status.secondaryLastIndication = message;
+                    s.status.secondaryIndicationHistogram = client.headers.histogram();
+                }
+            }
             if index == 0 {
                 s.status.primaryStage = stage;
                 s.status.primaryOperation = i32::from(d.operation);

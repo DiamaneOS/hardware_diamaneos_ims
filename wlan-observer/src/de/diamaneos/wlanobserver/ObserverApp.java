@@ -200,6 +200,13 @@ public final class ObserverApp extends Application {
                             + "/" + status.primaryOperation
                             + "/" + status.primaryError + " secondary=" + status.secondaryStage
                             + "/" + status.secondaryOperation + "/" + status.secondaryError;
+                    summary += " headers=" + status.primaryResponseHeaders + "/"
+                            + status.primaryIndicationHeaders + "/" + status.primaryLastIndication
+                            + "," + status.secondaryResponseHeaders + "/"
+                            + status.secondaryIndicationHeaders + "/" + status.secondaryLastIndication;
+                    summary += " header-enabled=" + status.diagnosticHeadersEnabled
+                            + " notifications=" + indicationCounts(status.primaryIndicationHistogram)
+                            + "," + indicationCounts(status.secondaryIndicationHistogram);
                     if (!summary.equals(lastStatus)) {
                         Log.i("WlanReporting", summary);
                         lastStatus = summary;
@@ -218,5 +225,16 @@ public final class ObserverApp extends Application {
             reporter = null; binder = null; lifetime = null;
             unavailable("Observer delivery unavailable");
         }
+    }
+
+    private static String indicationCounts(int[] values) {
+        if (values == null || values.length != 64) return "unavailable";
+        StringBuilder text = new StringBuilder();
+        for (int index = 0; index < values.length; index++) {
+            if (values[index] == 0) continue;
+            if (text.length() != 0) text.append(';');
+            text.append(Integer.toHexString(index + 0x20)).append(':').append(values[index]);
+        }
+        return text.length() == 0 ? "none" : text.toString();
     }
 }
