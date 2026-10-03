@@ -72,6 +72,7 @@ impl IReporter for Service {
             secondaryOperation: s.status.secondaryOperation,
             secondaryError: s.status.secondaryError,
             diagnosticHeadersEnabled: s.status.diagnosticHeadersEnabled,
+            diagnosticRegistrationEnabled: s.status.diagnosticRegistrationEnabled,
             primaryResponseHeaders: s.status.primaryResponseHeaders,
             primaryIndicationHeaders: s.status.primaryIndicationHeaders,
             primaryLastIndication: s.status.primaryLastIndication,
@@ -201,7 +202,11 @@ impl Client {
         Ok(Self {
             socket,
             endpoint: None,
-            state: Session::new(subscription).unwrap(),
+            state: if cfg!(private_dsd_registration) && diagnostics_enabled {
+                Session::new_with_diagnostic_registration(subscription).unwrap()
+            } else {
+                Session::new(subscription).unwrap()
+            },
             subscription,
             retry_at: 0,
             failures: 0,
@@ -325,6 +330,7 @@ fn run() -> io::Result<()> {
         lifetime: None,
         status: ReporterStatus {
             diagnosticHeadersEnabled: diagnostics_enabled,
+            diagnosticRegistrationEnabled: cfg!(private_dsd_registration) && diagnostics_enabled,
             ..Default::default()
         },
     }));
