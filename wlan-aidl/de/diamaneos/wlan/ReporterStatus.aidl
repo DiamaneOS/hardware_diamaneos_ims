@@ -21,4 +21,13 @@ parcelable ReporterStatus {
     // Fixed producer bounds:64 bins for message IDs0x20..0x5f; empty when disabled.
     int[] primaryIndicationHistogram;
     int[] secondaryIndicationHistogram;
+    // Failure-completion diagnostics only; no timer, address or port data.
+    long primaryKeepaliveFailureSent;
+    long primaryKeepaliveFailureAcknowledged;
+    int primaryKeepaliveFailureError;
+    long secondaryKeepaliveFailureSent;
+    long secondaryKeepaliveFailureAcknowledged;
+    int secondaryKeepaliveFailureError;
+    long primaryKeepaliveFailureDropped;
+    long secondaryKeepaliveFailureDropped;
 }
