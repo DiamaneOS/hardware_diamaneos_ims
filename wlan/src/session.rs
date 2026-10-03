@@ -2,7 +2,7 @@
 // Copyright 2026 The DiamaneOS Project
 //! One DSD client's acknowledged lifecycle. The runtime owns peer validation.
 use crate::{
-    bind_subscription, default_profile_status, diagnostic_notification_registration, response_for,
+    bind_subscription, default_profile_status, notification_registration, response_for,
     wifi_switch, withdrawal, Connected, BIND_SUBSCRIPTION, DATA_SETTINGS, DEFAULT_PROFILE_STATUS,
     INDICATION_REGISTRATION, WLAN_STATUS,
 };
@@ -19,7 +19,7 @@ pub struct Observation {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Step {
     Bind,
-    DiagnosticRegistration,
+    RegisterNotifications,
     Clear,
     ClearProfile,
     Switch,
@@ -44,9 +44,7 @@ pub struct Session {
     subscription: u32,
     bound: bool,
     keepalive_failures: crate::keepalive::Failures,
-    profile_notices: crate::profile_notice::Counters,
-    profile_reports: Option<crate::profile_reporting::Reports>,
-    diagnostic_registration: bool,
+    profile_reports: crate::profile_reporting::Reports,
     next_transaction: u16,
     step: Step,
     pending: Option<Pending>,
@@ -65,7 +63,7 @@ pub struct Session {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Diagnostics {
     /// Bind, clear, switch, status, settled-down, settled-up, failed, profile;
-    /// private diagnostic registration uses8.
+    /// notification registration uses8.
     pub stage: i32,
     pub operation: u16,
     /// 0: no failure; positive: QMI error; -1: timeout; -2: transaction
@@ -74,14 +72,15 @@ pub struct Diagnostics {
 }
 
 impl Session {
-    pub fn new(subscription: u32) -> Option<Self> {
-        (1..=2).contains(&subscription).then_some(Self {
+    pub fn new(subscription: u32, context_generation: u64) -> Option<Self> {
+        if !(1..=2).contains(&subscription) {
+            return None;
+        }
+        Some(Self {
             subscription,
             bound: false,
             keepalive_failures: Default::default(),
-            profile_notices: Default::default(),
-            profile_reports: None,
-            diagnostic_registration: false,
+            profile_reports: crate::profile_reporting::Reports::new(context_generation)?,
             next_transaction: 1,
             step: Step::Bind,
             pending: None,
@@ -96,26 +95,6 @@ impl Session {
             failed_operation: 0,
             error: 0,
         })
-    }
-
-    /// Opt-in PRIVATE DIAGNOSTIC, not supported production profile handling.
-    /// Runtime selection requires both a private compile flag and ro.debuggable.
-    pub fn new_with_diagnostic_registration(subscription: u32) -> Option<Self> {
-        Self::new(subscription).map(|mut session| {
-            session.diagnostic_registration = true;
-            session
-        })
-    }
-
-    /// Private experiment: only truthful unavailable quality completion.
-    /// Context generations must be globally unique and never reused.
-    pub fn new_with_diagnostic_profile_reporting(
-        subscription: u32,
-        generation: u64,
-    ) -> Option<Self> {
-        let mut session = Self::new_with_diagnostic_registration(subscription)?;
-        session.profile_reports = Some(crate::profile_reporting::Reports::new(generation)?);
-        Some(session)
     }
 
     pub fn observe(&mut self, mut observation: Observation) {
@@ -165,7 +144,7 @@ impl Session {
     pub fn diagnostics(&self) -> Diagnostics {
         let stage = match self.step {
             Step::Bind => 0,
-            Step::DiagnosticRegistration => 8,
+            Step::RegisterNotifications => 8,
             Step::Clear => 1,
             Step::ClearProfile | Step::Profile | Step::WithdrawProfile => 7,
             Step::Switch | Step::WithdrawSwitch => 2,
@@ -185,15 +164,8 @@ impl Session {
         self.keepalive_failures.diagnostics()
     }
 
-    pub fn profile_diagnostics(&self) -> &crate::profile_notice::Counters {
-        &self.profile_notices
-    }
-
     pub fn profile_report_diagnostics(&self) -> crate::profile_reporting::Diagnostics {
-        self.profile_reports
-            .as_ref()
-            .map(|r| r.diagnostics())
-            .unwrap_or_default()
+        self.profile_reports.diagnostics()
     }
 
     /// Retries preserve transaction and payload. Exhaustion requires a fresh
@@ -215,8 +187,7 @@ impl Session {
         };
         let profile = if self.bound {
             self.profile_reports
-                .as_mut()
-                .and_then(|r| r.poll(now_ms, &mut self.next_transaction))
+                .poll(now_ms, &mut self.next_transaction)
         } else {
             None
         };
@@ -307,10 +278,7 @@ impl Session {
         self.next_transaction = next;
         let (message, packet) = match self.step {
             Step::Bind => (BIND_SUBSCRIPTION, bind_subscription(tx, self.subscription)),
-            Step::DiagnosticRegistration => (
-                INDICATION_REGISTRATION,
-                diagnostic_notification_registration(tx),
-            ),
+            Step::RegisterNotifications => (INDICATION_REGISTRATION, notification_registration(tx)),
             Step::Clear => (WLAN_STATUS, withdrawal(tx, [0; 6])),
             Step::ClearProfile => (DEFAULT_PROFILE_STATUS, default_profile_status(tx, false)),
             Step::WithdrawProfile => {
@@ -382,15 +350,8 @@ impl Session {
     /// Malformed/unrelated packets cannot consume the pending request. A valid
     /// negative result does consume it and fails this session explicitly.
     pub fn receive(&mut self, bytes: &[u8]) {
-        if self.bound && self.diagnostic_registration {
-            let observed = self.profile_notices.observe(bytes);
-            let handled = self
-                .profile_reports
-                .as_mut()
-                .is_some_and(|r| r.receive(bytes));
-            if observed || handled {
-                return;
-            }
+        if self.bound && self.profile_reports.receive(bytes) {
+            return;
         }
         if self.bound && self.keepalive_failures.receive(bytes) {
             return;
@@ -417,8 +378,8 @@ impl Session {
             self.acknowledged_switch = self.sending.as_ref().map(|s| s.enabled);
         }
         self.step = match self.step {
-            Step::Bind if self.diagnostic_registration => Step::DiagnosticRegistration,
-            Step::Bind | Step::DiagnosticRegistration => Step::Clear,
+            Step::Bind => Step::RegisterNotifications,
+            Step::RegisterNotifications => Step::Clear,
             Step::Clear => Step::ClearProfile,
             Step::ClearProfile => self.update_start(),
             // Stock's runtime callback reports the current default profile
@@ -440,7 +401,7 @@ mod tests {
 
     #[test]
     fn optional_exhaustion_preserves_the_last_control_request_and_retries() {
-        let mut session = Session::new(1).unwrap();
+        let mut session = Session::new(1, 1).unwrap();
         session.bound = true;
         session.step = Step::WithdrawProfile;
         session.next_transaction = u16::MAX - 1;
@@ -472,7 +433,7 @@ mod tests {
     #[test]
     fn profile_exhaustion_keeps_allocated_control_until_ack() {
         use diamaneos_ims_dcm::protocol::{Encoder, Kind};
-        let mut session = Session::new_with_diagnostic_profile_reporting(1, 1).unwrap();
+        let mut session = Session::new(1, 1).unwrap();
         session.bound = true;
         session.step = Step::WithdrawProfile;
         session.next_transaction = u16::MAX - 1;

@@ -23,7 +23,7 @@ fn ack(request: &[u8]) -> [u8; 14] {
     ]
 }
 fn ready(s: &mut Session) {
-    for id in [0x27, 0x20, 0x43, 0x34, 0x43, 0x20] {
+    for id in [0x27, 0x38, 0x20, 0x43, 0x34, 0x43, 0x20] {
         let p = s.poll(0).unwrap();
         assert_eq!(p[3], id);
         s.receive(&ack(&p));
@@ -32,10 +32,11 @@ fn ready(s: &mut Session) {
 }
 #[test]
 fn bind_clear_and_ack_before_announcing_available() {
-    assert!(Session::new(0).is_none());
-    assert!(Session::new(3).is_none());
-    let mut a = Session::new(1).unwrap();
-    let mut b = Session::new(2).unwrap();
+    assert!(Session::new(0, 1).is_none());
+    assert!(Session::new(3, 1).is_none());
+    assert!(Session::new(1, 0).is_none());
+    let mut a = Session::new(1, 1).unwrap();
+    let mut b = Session::new(2, 2).unwrap();
     a.observe(connected());
     b.observe(connected());
     let pa = a.poll(0).unwrap();
@@ -44,6 +45,9 @@ fn bind_clear_and_ack_before_announcing_available() {
     assert_eq!(&pb[10..14], &2_u32.to_le_bytes());
     a.receive(&ack(&pa));
     b.receive(&ack(&pb));
+    let registration = a.poll(0).unwrap();
+    assert_eq!(registration[3], 0x38);
+    a.receive(&ack(&registration));
     let clear = a.poll(0).unwrap();
     assert_eq!(&clear[clear.len() - 8..clear.len() - 4], &[0, 0, 0, 0]);
     assert!(a.poll(1).is_none());
@@ -55,13 +59,16 @@ fn bind_clear_and_ack_before_announcing_available() {
     }
     assert!(a.poll(3).is_none());
     // The second subscription cannot inherit the first client's acknowledgements.
+    let registration = b.poll(0).unwrap();
+    assert_eq!(registration[3], 0x38);
+    b.receive(&ack(&registration));
     assert_eq!(b.poll(0).unwrap()[3], 0x20);
 }
 #[test]
 fn disconnect_during_pending_up_does_not_retry_stale_up() {
-    let mut s = Session::new(1).unwrap();
+    let mut s = Session::new(1, 1).unwrap();
     s.observe(connected());
-    for _ in 0..4 {
+    for _ in 0..5 {
         let p = s.poll(0).unwrap();
         s.receive(&ack(&p));
     }
@@ -83,7 +90,7 @@ fn disconnect_during_pending_up_does_not_retry_stale_up() {
 }
 #[test]
 fn bounded_retries_and_negative_ack_fail_explicitly() {
-    let mut s = Session::new(1).unwrap();
+    let mut s = Session::new(1, 1).unwrap();
     let first = s.poll(0).unwrap();
     let mut unrelated = ack(&first);
     unrelated[1] = 99;
@@ -96,7 +103,7 @@ fn bounded_retries_and_negative_ack_fail_explicitly() {
     assert_eq!(s.diagnostics().operation, 0x27);
     assert_eq!(s.diagnostics().error, -1);
     assert!(s.poll(u64::MAX).is_none());
-    let mut s = Session::new(1).unwrap();
+    let mut s = Session::new(1, 1).unwrap();
     let p = s.poll(0).unwrap();
     let mut no = ack(&p);
     no[10] = 1;
@@ -108,10 +115,10 @@ fn bounded_retries_and_negative_ack_fail_explicitly() {
 
 #[test]
 fn diagnostics_distinguish_pending_and_acknowledged_status() {
-    let mut s = Session::new(1).unwrap();
+    let mut s = Session::new(1, 1).unwrap();
     s.observe(connected());
     assert_eq!(s.diagnostics().stage, 0);
-    for next_stage in [1, 7, 2, 7, 3, 5] {
+    for next_stage in [8, 1, 7, 2, 7, 3, 5] {
         let p = s.poll(0).unwrap();
         s.receive(&ack(&p));
         assert_eq!(s.diagnostics().stage, next_stage);
@@ -130,21 +137,24 @@ fn diagnostics_distinguish_pending_and_acknowledged_status() {
 }
 #[test]
 fn new_modem_session_rebinds_and_clears_before_replaying() {
-    let mut old = Session::new(1).unwrap();
+    let mut old = Session::new(1, 1).unwrap();
     old.observe(connected());
     ready(&mut old);
-    let mut restarted = Session::new(1).unwrap();
+    let mut restarted = Session::new(1, 2).unwrap();
     restarted.observe(connected());
     let bind = restarted.poll(0).unwrap();
     assert_eq!(bind[3], 0x27);
     restarted.receive(&ack(&bind));
-    assert_eq!(restarted.poll(1).unwrap()[3], 0x20);
+    let registration = restarted.poll(1).unwrap();
+    assert_eq!(registration[3], 0x38);
+    restarted.receive(&ack(&registration));
+    assert_eq!(restarted.poll(2).unwrap()[3], 0x20);
 }
 
 #[test]
 fn resolver_replacement_during_either_positive_ack_uses_only_latest_metadata() {
     for pending_message in [0x43, 0x20] {
-        let mut s = Session::new(1).unwrap();
+        let mut s = Session::new(1, 1).unwrap();
         let mut old = connected();
         old.network = Some(
             old.network
@@ -189,7 +199,7 @@ fn resolver_replacement_during_either_positive_ack_uses_only_latest_metadata() {
 
 #[test]
 fn default_route_change_is_reported_without_changing_link_identity() {
-    let mut s = Session::new(1).unwrap();
+    let mut s = Session::new(1, 1).unwrap();
     let mut observation = connected();
     s.observe(observation.clone());
     ready(&mut s);
@@ -214,7 +224,7 @@ fn default_route_change_is_reported_without_changing_link_identity() {
 fn default_profile_requires_connected_validated_default_network() {
     for validated in [false, true] {
         for default_route in [false, true] {
-            let mut s = Session::new(1).unwrap();
+            let mut s = Session::new(1, 1).unwrap();
             s.observe(Observation {
                 enabled: true,
                 network: Some(
@@ -228,7 +238,7 @@ fn default_profile_requires_connected_validated_default_network() {
                     .with_default_route(default_route),
                 ),
             });
-            for id in [0x27, 0x20, 0x43, 0x34] {
+            for id in [0x27, 0x38, 0x20, 0x43, 0x34] {
                 let request = s.poll(0).unwrap();
                 assert_eq!(request[3], id);
                 if id == 0x43 {
@@ -257,11 +267,11 @@ fn default_profile_requires_connected_validated_default_network() {
 #[test]
 fn loss_during_either_positive_ack_never_retries_stale_availability() {
     for pending_message in [0x43, 0x20] {
-        let mut s = Session::new(1).unwrap();
+        let mut s = Session::new(1, 1).unwrap();
         let mut observation = connected();
         observation.network = observation.network.map(|n| n.with_default_route(true));
         s.observe(observation);
-        for _ in 0..4 {
+        for _ in 0..5 {
             let request = s.poll(0).unwrap();
             s.receive(&ack(&request));
         }
@@ -299,9 +309,9 @@ fn loss_during_either_positive_ack_never_retries_stale_availability() {
 #[test]
 fn rejection_of_either_positive_step_never_settles_available() {
     for rejected_message in [0x43, 0x20] {
-        let mut s = Session::new(1).unwrap();
+        let mut s = Session::new(1, 1).unwrap();
         s.observe(connected());
-        for _ in 0..4 {
+        for _ in 0..5 {
             let request = s.poll(0).unwrap();
             s.receive(&ack(&request));
         }
@@ -328,7 +338,7 @@ fn rejection_of_either_positive_step_never_settles_available() {
 #[test]
 fn withdrawal_revokes_profile_before_station_and_administrative_switch() {
     for subscription in [1, 2] {
-        let mut s = Session::new(subscription).unwrap();
+        let mut s = Session::new(subscription, 1).unwrap();
         s.observe(connected());
         ready(&mut s);
         s.observe(Observation {
@@ -352,7 +362,7 @@ fn withdrawal_revokes_profile_before_station_and_administrative_switch() {
 
 #[test]
 fn rejected_withdrawal_profile_stops_before_station_or_switch_notification() {
-    let mut s = Session::new(1).unwrap();
+    let mut s = Session::new(1, 1).unwrap();
     s.observe(connected());
     ready(&mut s);
     s.observe(Observation {
@@ -373,7 +383,7 @@ fn rejected_withdrawal_profile_stops_before_station_or_switch_notification() {
 #[test]
 fn connection_loss_preserves_the_acknowledged_administrative_switch() {
     for subscription in [1, 2] {
-        let mut s = Session::new(subscription).unwrap();
+        let mut s = Session::new(subscription, 1).unwrap();
         s.observe(connected());
         ready(&mut s);
         s.observe(Observation {
@@ -399,7 +409,7 @@ fn connection_loss_preserves_the_acknowledged_administrative_switch() {
 
 #[test]
 fn networkless_adapter_enable_is_reported_once_before_connection() {
-    let mut s = Session::new(1).unwrap();
+    let mut s = Session::new(1, 1).unwrap();
     s.observe(connected());
     ready(&mut s);
     for enabled in [false, true] {
@@ -428,7 +438,7 @@ fn networkless_adapter_enable_is_reported_once_before_connection() {
 
 #[test]
 fn superseded_unacknowledged_switch_is_reconciled_with_a_new_transaction() {
-    let mut s = Session::new(1).unwrap();
+    let mut s = Session::new(1, 1).unwrap();
     s.observe(connected());
     ready(&mut s);
     s.observe(Observation {

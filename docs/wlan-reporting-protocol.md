@@ -1,7 +1,7 @@
 # DSD STA status: offline codec
 
 `wlan/` is a memory-safe, socket-free codec for an observed subset of Qualcomm
-DSD STA reporting. The pure codec is host-tested and is used by the opt-in reporter candidate.
+DSD STA reporting. The pure codec is host-tested and is used by the device-selected reporter.
 It cannot send modem requests, observe Wi-Fi, publish a service or change routing.
 It does not replace the full CNE stack. Basic FP6 calling has been demonstrated
 with the adapter, while reconnect and broader lifecycle qualification remain open.
@@ -46,8 +46,9 @@ QRTR endpoint and modem generation; the parser does not authenticate a peer.
 Unknown extensions are rejected until reviewed. `session.rs` adds bounded retries, acknowledgement sequencing and subscription
 binding (`0x27`, required uint32 TLV1, observed primary1/secondary2). Wi-Fi switch
 reporting uses `0x34`, optional boolean TLV0x13 from the stock initializer. The
-runtime does not advertise unimplemented capabilities or register for optional
-measurement requests. It acknowledges the stock default connectivity profile
+runtime does not advertise unimplemented measurement capabilities. It registers
+for the reviewed notification subset and explicitly completes unavailable
+measurement requests as described below. It acknowledges the stock default connectivity profile
 alongside STA state, including negative startup reconciliation and withdrawal.
 
 Loss updates first report profile0 as not met, then withdraw STA availability,
@@ -141,7 +142,8 @@ indicator, not a bandwidth, signal, latency or carrier-specific QoS measurement.
 The source reporter uses the same criterion from its authenticated snapshot.
 Missing, disconnected, unvalidated or non-default observations report not met.
 It never accepts a caller-selected profile, a quality estimate or arbitrary
-modem request bytes. Optional measurement profiles remain unimplemented.
+modem request bytes. Qualified measurements for nondefault profiles remain unimplemented; their
+unavailable completion is separate from this connectivity profile.
 
 Both STA and default-profile replies must match the current transaction and
 verified modem peer before the session settles. Startup clears both prior states;
@@ -170,56 +172,31 @@ fixed reply. The reply has its own matching-ACK/retry state and shares the core
 session's nonwrapping transaction space. Connectivity reconciliation has priority
 and does not wait for keepalive completion. Each bounded runtime cycle advances
 both deadline machines and sends at most one packet from each channel, with
-connectivity first. Queue overflow and discarded queued completions are counted
-without retaining instruction data. Rejection/timeout blocks this optional
+connectivity first. Queue overflow leaves a sticky optional-channel error (-4) until context
+replacement, without retaining instruction data or blocking core connectivity. Rejection/timeout blocks this optional
 reply channel until context replacement; transaction exhaustion requires a new
 session. This closes a missing failure contract, not keepalive functionality or
 nondefault quality-profile support. Native carrier effect remains unqualified.
 
-## Profile notification observations
+## Profile notification validation
 
 The pure `profile_notice` decoder validates the authenticated FP6.QREL.16.111.0
-DSD initialization indication `0x45` and selection indication `0x3f`. The runtime
-uses it only for private compile/debug gated observations in a current bound
-subscription context. It sends no request or quality result. These messages
-are separate from the fixed default connectivity profile.
+initialization indication `0x45` and selection indication `0x3f`. Initialization
+has a required uint32 type (known types4–43) and a maximum62-byte body. Optional
+threshold fields10/11,14/15,16/17 have two-byte widths; optional12 is a count byte
+and at most10 SIM-identifier bytes; optional13 is an eight-byte opaque identifier.
+Selection has a required uint64 mask and a maximum36-byte body; optional10 is a
+count byte with at most10 uninterpreted bytes, and optional11 is an eight-byte
+opaque identifier. Framing, duplicate/unknown TLVs, truncation and widths are
+checked. This does not validate threshold units or subscriber identity.
 
-Initialization has a required little-endian uint32 type, observed types4–43,
-and a maximum62-byte body. Optional RSSI threshold fields10/11,14/15,16/17 are
-two bytes each; optional12 is a count byte followed by at most10 SIM-identifier
-bytes; optional13 is an eight-byte opaque measurement identifier. Selection has
-a required little-endian uint64 mask and a maximum36-byte body; optional10 is a
-count byte followed by at most10 bytes of unestablished meaning, and optional11
-is an eight-byte opaque measurement identifier. Unknown TLVs, duplicate TLVs,
-truncation, wrong widths and wrong framing are rejected.
-
-The stock selection consumer maps bits32–63 to types4–35, bits3–9 to types36–42,
-and bit16 to type43. The decoder preserves only that known selection subset and
-whether other bits were present; it assigns no meaning to those other bits.
-Initialization returns only the type. Optional identifiers and thresholds are
-validated for wire shape but never copied, interpreted, stored or logged.
-This is structural validation, not validation of threshold units/ranges or
-subscriber identity.
-
-An observed initialization or set selection bit does not prove an active profile,
-its acceptance, a measured result, or carrier preference. Stock keys profiles by
-client, opaque measurement identifier and type. This decoder intentionally drops
-that identity, so its output must not be used as a profile registry or to send a
-result. A future implementation needs bounded, private identity/lifecycle handling
-and qualified measurements before adding that behavior. The caller must establish
-the current bound modem endpoint before consuming any observation.
-
-Private status exposes fixed40-bin saturating counts for types4–43, labelled
-initialization type observed and selection bit observed. It also counts valid
-selection messages, including zero masks, rejected notifications and selection
-messages containing unmapped bits. Rejection can mean an unsupported type/field
-as well as malformed framing; it is not an assertion that firmware is faulty.
-Counters reset when the QRTR client/context is replaced, not on each Wi-Fi
-observation. No measurement identity or threshold is available through status.
-Repeated messages and different measurement contexts collapse; counts must never
-drive a quality response or establish active/accepted profile state. Types/counts
-still disclose limited modem policy/activity. Release builds omit status logging,
-and ordinary sessions do not collect these private profile observations.
+Stock maps bits32–63 to types4–35, bits3–9 to types36–42, and bit16 to type43.
+The structural decoder retains only type/known-mask information, never thresholds,
+SIM bytes or identifiers. The separate bounded lifecycle parser owns only the
+opaque key needed to match initialization and selection, as described below.
+Neither an indication nor a selected bit proves measured quality, modem
+acceptance or carrier preference. Runtime peer and subscription checks precede
+all notification handling.
 
 ## Offline profile ownership and unavailable measurements
 
@@ -242,7 +219,8 @@ A selected entry can yield a private report token. It encodes only request0x43
 with QUALITY_NOT_MET1 and CQ_FAIL_INCONCLUSIVE3; it cannot encode positive quality.
 Measurement ID TLV12 is included only when nonzero. Unknown band is omitted.
 This declares unavailable qualified measurements, not measured link failure or
-offload success. Native modem acceptance and calling effect remain untested.
+offload success. Native modem acknowledgement and calling have been observed on development
+images; recovery and carrier effects remain separate qualification gates.
 
 Tokens carry entry revision and a runtime-owned context generation. Generations
 must be globally unique across both subscriptions and never reused; stop on
@@ -250,28 +228,35 @@ exhaustion. Revalidate a token before sending or retrying. Match the exact pendi
 transaction and current endpoint/generation before acknowledging it. Destruction,
 reinitialization and context replacement invalidate old tokens; a late ACK cannot
 mark the replacement reported. No identity or packet buffer may enter diagnostics.
-Runtime transport, retry/fairness handling, observation loss and qualified positive
-measurement policy are separate integration work.
+The runtime handles transport, retry/fairness and observation loss. Qualified
+positive measurement policy remains unimplemented.
 
-The private experiment now connects unavailable completions through a separate
-pending-request channel. It is selected only by the private registration compile
-flag AND the immutable debug-build flag. Ordinary sessions never collect or send
-these optional profile results. Both subscription clients and their replacements
-use one checked process-wide context-generation allocator; process exit drops all
-tokens. Unsupported lifecycle input blocks the optional channel until replacement.
+Unavailable completions use a separate pending-request channel. Each context has
+at most one pending reply, with three attempts and a two-second deadline. Every
+transport cycle advances core, keepalive and profile deadlines, emitting at most
+three packets in that priority order. All channels share the nonwrapping
+transaction allocator. Default and nondefault profile replies use different
+matched transactions. Selection removal cancels an obsolete retry; its late ACK
+cannot complete a reinitialized entry. A negative ACK or timeout blocks optional
+reporting without claiming core failure. Transaction exhaustion requests bounded
+session renewal only after allocated core work drains.
 
-Each context has at most one pending reply with three attempts and a two-second
-deadline. Every transport cycle advances core, keepalive and profile deadlines,
-emitting at most three packets in that priority order. All channels share the
-nonwrapping transaction allocator. A profile0 connectivity reply and a nondefault
-profile reply have the same message ID but different matched transactions. Selection
-removal cancels an unsent retry; its old ACK cannot complete a reinitialized entry.
-Negative ACK or timeout blocks optional reporting without claiming core failure.
-Transaction exhaustion requests the existing bounded session-renewal path only
-after allocated core work drains, preserving packets already allocated that cycle.
+## Unavailable measurement completion
 
-Private diagnostics expose only sent/acknowledged/cancelled counts and an error
-category. No measurement ID, thresholds, payload or subscriber data are logged.
-This completes truthful unavailable-result handling, not measured quality or VoWiFi
-readiness. Firmware acceptance, cellular/WLAN recovery and carrier effects still
-require native testing. The diagnostic build must not be promoted as release ready.
+The reporter subscribes to the qualified stock notification subset after binding.
+Bounded per-context ownership tracks initialization and selection for known
+profile types, with checked revision/context fences and nonwrapping shared
+transactions. Duplicate initialization is ignored; zero/cleared selections erase
+owned entries, cancel obsolete replies and quarantine stale acknowledgements.
+
+Selected nondefault profiles receive an explicit not-met/inconclusive completion
+when no qualified measurement provider exists. Unknown lifecycle shapes and
+capacity failures stop that optional channel; no positive quality is fabricated.
+The independent keepalive channel likewise reports generic operation failure
+without retaining endpoints or generating IP traffic. Core control deadlines and
+retries continue fairly when optional channels are busy or unavailable.
+
+This closes response contracts; it does not implement proprietary quality policy,
+keepalive offload, or prove every carrier's recovery behavior. Profile0 keeps its
+separate truthful connectivity meaning. Protocol activation is independent of
+`ro.debuggable`; diagnostic traces and histograms are not part of this path.
