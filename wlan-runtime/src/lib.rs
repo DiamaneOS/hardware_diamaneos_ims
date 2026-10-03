@@ -3,6 +3,10 @@
 #![forbid(unsafe_code)]
 use diamaneos_wlan_reporting::session::Observation;
 
+/// Three ordinary 10-second observer heartbeats. Never keep a positive snapshot
+/// indefinitely after observer death, delivery failure, or a stalled process.
+const OBSERVATION_LEASE_MS: u64 = 30_000;
+
 #[derive(Default)]
 pub struct Observations {
     generation: u64,
@@ -54,7 +58,7 @@ impl Observations {
         }
     }
     pub fn current(&mut self, now_ms: u64) -> Option<Observation> {
-        if self.sequence != 0 && now_ms.saturating_sub(self.updated_ms) >= 30_000 {
+        if self.sequence != 0 && now_ms.saturating_sub(self.updated_ms) >= OBSERVATION_LEASE_MS {
             self.active = false;
             self.invalidate();
         }

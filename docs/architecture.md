@@ -55,3 +55,16 @@ Full Soong/link, enforcing policy, native syscall-filter execution and modem/car
 behavior remain unqualified by host tests. Simulated emergency scenarios verify
 only the implemented state/protocol boundaries, not real network fallback or
 responder location receipt.
+
+## Fixed values and downstream budgets
+
+The PDP/session ID range20–98 is the authenticated stock DCM contract; capacity
+is derived from those inclusive endpoints. Reserving eight IDs for emergency
+admission and admitting at most four modem clients are downstream containment
+choices. Emergency reservation protects space from normal IMS exhaustion within
+the independent client limit; it cannot promise admission of unlimited clients.
+Wire message/TLV values, QRTR family and arm64 seccomp offsets are fixed protocol
+or Linux UAPI facts. They belong in named definitions with provenance, not
+user-editable configuration. Device-selected modem node and slot count remain
+product configuration. Limits and timings should change only with their
+lifecycle, memory and device-qualification implications reviewed together.

@@ -180,3 +180,21 @@ must be updated together as part of the coherent OS build.
 The temporary observation-state and address-rejection instrumentation used during
 IPv6 bring-up has been removed. Address filtering and snapshot consistency checks
 remain unchanged.
+
+## Scheduling and containment limits
+
+The observer's named ten-second heartbeat refreshes a thirty-second lease; actual
+network changes and current-reporter death schedule immediate publication.
+Expiry withdraws the last positive network without guessing a switch change.
+The reporter processes at most eight received datagrams per context per cycle,
+then polls each independent deadline machine; its ordinary loop period is250ms.
+A failed session permits at most three renewals per unchanged observation,
+spaced thirty seconds apart. These are downstream bounds on repeated work,
+not carrier registration timers or a promise of registration within that period.
+
+Orderly shutdown attempts withdrawal for at most2.5seconds, with50ms polling.
+That allows one two-second protocol deadline plus scheduling margin, while
+bounding init shutdown. Forced termination or an unavailable modem cannot promise
+withdrawal. None of these timers fabricates connectivity or bypasses protocol
+acknowledgements. Keep observer heartbeat and lease values coherent when changing
+this scheduling policy; exact recovery remains a native qualification gate.

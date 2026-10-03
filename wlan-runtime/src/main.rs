@@ -30,6 +30,15 @@ use std::{
 };
 
 const SERVICE: &str = "de.diamaneos.wlan.IReporter/default";
+// Downstream scheduling/containment choices, not carrier registration timers.
+const SESSION_RENEWAL_DELAY_MS: u64 = 30_000;
+const MAX_SESSION_RENEWALS: u8 = 3;
+const MAX_RECEIVED_PACKETS_PER_CYCLE: usize = 8;
+const REPORT_LOOP_PERIOD_MS: u64 = 250;
+// One 2-second protocol deadline plus scheduling margin; never block init exit
+// indefinitely trying to reconcile unavailable modem state.
+const SHUTDOWN_WITHDRAWAL_BUDGET_MS: u64 = 2_500;
+const SHUTDOWN_POLL_PERIOD_MS: u64 = 50;
 static STOP: AtomicBool = AtomicBool::new(false);
 // Globally unique in this process across both subscriptions and replacements.
 static NEXT_PROFILE_CONTEXT: AtomicU64 = AtomicU64::new(1);
@@ -224,9 +233,9 @@ impl Client {
         }
         if self.state.failed() {
             if self.retry_at == 0 {
-                self.retry_at = now.saturating_add(30_000);
+                self.retry_at = now.saturating_add(SESSION_RENEWAL_DELAY_MS);
             }
-            if now >= self.retry_at && self.failures < 3 {
+            if now >= self.retry_at && self.failures < MAX_SESSION_RENEWALS {
                 let failures = self.failures + 1;
                 self.reconnect(node)?;
                 self.failures = failures;
@@ -235,7 +244,7 @@ impl Client {
         }
         self.state.observe(observation.clone());
         // Bound input work so indication floods cannot starve expiry or the other SIM.
-        for _ in 0..8 {
+        for _ in 0..MAX_RECEIVED_PACKETS_PER_CYCLE {
             let Some((peer, bytes)) = self.socket.receive(Duration::ZERO)? else {
                 break;
             };
@@ -377,7 +386,7 @@ fn run() -> io::Result<()> {
             }
         }
         drop(s);
-        std::thread::sleep(Duration::from_millis(250));
+        std::thread::sleep(Duration::from_millis(REPORT_LOOP_PERIOD_MS));
     }
     let current = shared
         .lock()
@@ -389,7 +398,7 @@ fn run() -> io::Result<()> {
             enabled: current.enabled,
             network: None,
         };
-        let deadline = elapsed(origin).saturating_add(2500);
+        let deadline = elapsed(origin).saturating_add(SHUTDOWN_WITHDRAWAL_BUDGET_MS);
         while elapsed(origin) < deadline {
             for client in &mut clients {
                 client.step(node, &withdrawn, elapsed(origin))?;
@@ -397,7 +406,7 @@ fn run() -> io::Result<()> {
             if clients.iter().all(|c| c.state.settled()) {
                 break;
             }
-            std::thread::sleep(Duration::from_millis(50));
+            std::thread::sleep(Duration::from_millis(SHUTDOWN_POLL_PERIOD_MS));
         }
     }
     Ok(())
