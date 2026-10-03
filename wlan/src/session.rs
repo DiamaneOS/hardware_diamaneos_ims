@@ -45,6 +45,7 @@ pub struct Session {
     bound: bool,
     keepalive_failures: crate::keepalive::Failures,
     profile_notices: crate::profile_notice::Counters,
+    profile_reports: Option<crate::profile_reporting::Reports>,
     diagnostic_registration: bool,
     next_transaction: u16,
     step: Step,
@@ -79,6 +80,7 @@ impl Session {
             bound: false,
             keepalive_failures: Default::default(),
             profile_notices: Default::default(),
+            profile_reports: None,
             diagnostic_registration: false,
             next_transaction: 1,
             step: Step::Bind,
@@ -103,6 +105,17 @@ impl Session {
             session.diagnostic_registration = true;
             session
         })
+    }
+
+    /// Private experiment: only truthful unavailable quality completion.
+    /// Context generations must be globally unique and never reused.
+    pub fn new_with_diagnostic_profile_reporting(
+        subscription: u32,
+        generation: u64,
+    ) -> Option<Self> {
+        let mut session = Self::new_with_diagnostic_registration(subscription)?;
+        session.profile_reports = Some(crate::profile_reporting::Reports::new(generation)?);
+        Some(session)
     }
 
     pub fn observe(&mut self, mut observation: Observation) {
@@ -176,16 +189,23 @@ impl Session {
         &self.profile_notices
     }
 
+    pub fn profile_report_diagnostics(&self) -> crate::profile_reporting::Diagnostics {
+        self.profile_reports
+            .as_ref()
+            .map(|r| r.diagnostics())
+            .unwrap_or_default()
+    }
+
     /// Retries preserve transaction and payload. Exhaustion requires a fresh
     /// QRTR endpoint; this instance never wraps and reuses a transaction ID.
     pub fn poll(&mut self, now_ms: u64) -> Option<Vec<u8>> {
         self.poll_control(now_ms)
     }
 
-    /// Bounded transport cycle. Send both present packets in order: connectivity
-    /// first, then optional completion. Both deadline machines advance even when
+    /// Bounded transport cycle. Send present packets in order: connectivity,
+    /// keepalive failure, then unavailable quality. All deadline machines advance even when
     /// control emits continuously; neither result is discarded or speculative.
-    pub fn poll_cycle(&mut self, now_ms: u64) -> [Option<Vec<u8>>; 2] {
+    pub fn poll_cycle(&mut self, now_ms: u64) -> [Option<Vec<u8>>; 3] {
         let control = self.poll_control(now_ms);
         let reply = if self.bound {
             self.keepalive_failures
@@ -193,20 +213,31 @@ impl Session {
         } else {
             None
         };
+        let profile = if self.bound {
+            self.profile_reports
+                .as_mut()
+                .and_then(|r| r.poll(now_ms, &mut self.next_transaction))
+        } else {
+            None
+        };
         // A final allocated connectivity packet must still be sent and tracked.
         // Renew only after its ACK/retries drain; optional exhaustion cannot
         // discard an in-flight withdrawal or consume its transaction.
-        if self.keepalive_failures.diagnostics().error == -2
-            && self.pending.is_none()
-            && !self.failed()
-        {
-            self.failed_operation = crate::NAT_KEEPALIVE_OPERATION_STATUS;
+        let exhausted_keepalive = self.keepalive_failures.diagnostics().error == -2;
+        let exhausted_profile = self.profile_report_diagnostics().error == -2;
+        if (exhausted_keepalive || exhausted_profile) && self.pending.is_none() && !self.failed() {
+            self.failed_operation = if exhausted_keepalive {
+                crate::NAT_KEEPALIVE_OPERATION_STATUS
+            } else {
+                crate::DEFAULT_PROFILE_STATUS
+            };
             self.error = -2;
             self.pending = None;
             self.step = Step::Failed;
-            return [None, None];
+            // Preserve any packet already allocated in this cycle. Renewal waits
+            // for the runtime's existing bounded failed-session path.
         }
-        [control, reply]
+        [control, reply, profile]
     }
 
     fn poll_control(&mut self, now_ms: u64) -> Option<Vec<u8>> {
@@ -351,8 +382,15 @@ impl Session {
     /// Malformed/unrelated packets cannot consume the pending request. A valid
     /// negative result does consume it and fails this session explicitly.
     pub fn receive(&mut self, bytes: &[u8]) {
-        if self.bound && self.diagnostic_registration && self.profile_notices.observe(bytes) {
-            return;
+        if self.bound && self.diagnostic_registration {
+            let observed = self.profile_notices.observe(bytes);
+            let handled = self
+                .profile_reports
+                .as_mut()
+                .is_some_and(|r| r.receive(bytes));
+            if observed || handled {
+                return;
+            }
         }
         if self.bound && self.keepalive_failures.receive(bytes) {
             return;
@@ -407,7 +445,8 @@ mod tests {
         session.step = Step::WithdrawProfile;
         session.next_transaction = u16::MAX - 1;
         session.receive(&[4, 0, 0, 0x41, 0, 4, 0, 1, 1, 0, 1]);
-        let [control, optional] = session.poll_cycle(0);
+        let [control, optional, profile] = session.poll_cycle(0);
+        assert!(profile.is_none());
         let control = control.unwrap();
         assert_eq!(control[3], DEFAULT_PROFILE_STATUS as u8);
         assert_eq!(&control[1..3], &(u16::MAX - 1).to_le_bytes());
@@ -415,7 +454,8 @@ mod tests {
         assert!(!session.failed());
         assert_eq!(session.keepalive_diagnostics().error, -2);
         assert_eq!(session.pending.as_ref().unwrap().transaction, u16::MAX - 1);
-        let [retry, optional] = session.poll_cycle(2000);
+        let [retry, optional, profile] = session.poll_cycle(2000);
+        assert!(profile.is_none());
         assert_eq!(retry.unwrap(), control);
         assert!(optional.is_none());
         assert!(!session.failed());
@@ -424,6 +464,33 @@ mod tests {
         ]);
         assert!(session.step == Step::WithdrawStatus);
         assert!(session.pending.is_none());
+        assert!(session.poll_cycle(2001).into_iter().all(|p| p.is_none()));
+        assert!(session.failed());
+        assert_eq!(session.next_transaction, u16::MAX);
+    }
+
+    #[test]
+    fn profile_exhaustion_keeps_allocated_control_until_ack() {
+        use diamaneos_ims_dcm::protocol::{Encoder, Kind};
+        let mut session = Session::new_with_diagnostic_profile_reporting(1, 1).unwrap();
+        session.bound = true;
+        session.step = Step::WithdrawProfile;
+        session.next_transaction = u16::MAX - 1;
+        let mut init = Encoder::new(Kind::Indication, 0, 0x45);
+        init.tlv(1, &35_u32.to_le_bytes()).unwrap();
+        session.receive(&init.finish());
+        let mut selection = Encoder::new(Kind::Indication, 0, 0x3f);
+        selection.tlv(1, &(1_u64 << 63).to_le_bytes()).unwrap();
+        session.receive(&selection.finish());
+        let [control, nat, profile] = session.poll_cycle(0);
+        let control = control.unwrap();
+        assert!(nat.is_none() && profile.is_none());
+        assert_eq!(session.profile_report_diagnostics().error, -2);
+        assert!(!session.failed());
+        assert_eq!(session.poll_cycle(2000)[0].take().unwrap(), control);
+        session.receive(&[
+            2, control[1], control[2], control[3], 0, 7, 0, 2, 4, 0, 0, 0, 0, 0,
+        ]);
         assert!(session.poll_cycle(2001).into_iter().all(|p| p.is_none()));
         assert!(session.failed());
         assert_eq!(session.next_transaction, u16::MAX);

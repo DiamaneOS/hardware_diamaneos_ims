@@ -42,4 +42,13 @@ parcelable ReporterStatus {
     long secondaryProfileRejectedMessages;
     long primaryProfileUnmappedSelections;
     long secondaryProfileUnmappedSelections;
+    // Private unavailable-measurement completion, never a quality-met count.
+    long primaryProfileReportsSent;
+    long primaryProfileReportsAcknowledged;
+    long primaryProfileReportsCancelled;
+    int primaryProfileReportsError;
+    long secondaryProfileReportsSent;
+    long secondaryProfileReportsAcknowledged;
+    long secondaryProfileReportsCancelled;
+    int secondaryProfileReportsError;
 }
