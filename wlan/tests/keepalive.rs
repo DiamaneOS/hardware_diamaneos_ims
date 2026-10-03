@@ -28,9 +28,9 @@ fn connected() -> Observation {
     }
 }
 fn ready() -> Session {
-    let mut s = Session::new(1).unwrap();
+    let mut s = Session::new(1, 1).unwrap();
     s.observe(connected());
-    for id in [0x27, 0x20, 0x43, 0x34, 0x43, 0x20] {
+    for id in [0x27, 0x38, 0x20, 0x43, 0x34, 0x43, 0x20] {
         let p = s.poll(0).unwrap();
         assert_eq!(p[3], id);
         s.receive(&ack(&p));
@@ -100,11 +100,11 @@ fn independent_reply_cannot_consume_status_or_block_network_loss() {
 
 #[test]
 fn burst_capacity_is_fixed_and_unbound_instructions_are_ignored() {
-    let mut unbound = Session::new(1).unwrap();
+    let mut unbound = Session::new(1, 1).unwrap();
     unbound.observe(connected());
     unbound.receive(&instruction());
     assert_eq!(unbound.keepalive_diagnostics().sent, 0);
-    for id in [0x27, 0x20, 0x43, 0x34, 0x43, 0x20] {
+    for id in [0x27, 0x38, 0x20, 0x43, 0x34, 0x43, 0x20] {
         let p = unbound.poll(0).unwrap();
         assert_eq!(p[3], id);
         unbound.receive(&ack(&p));
@@ -123,6 +123,8 @@ fn burst_capacity_is_fixed_and_unbound_instructions_are_ignored() {
     assert_eq!(s.keepalive_diagnostics().sent, 8);
     assert_eq!(s.keepalive_diagnostics().dropped, 992);
     assert_eq!(s.keepalive_diagnostics().acknowledged, 8);
+    assert_eq!(s.keepalive_diagnostics().error, -4);
+    assert!(s.settled());
 }
 
 #[test]
@@ -145,6 +147,7 @@ fn timeout_or_rejection_is_explicit_without_breaking_connectivity_state() {
         }
         s.receive(&instruction());
         assert!(s.poll_cycle(7000).into_iter().all(|p| p.is_none()));
+        assert_eq!(s.keepalive_diagnostics().error, if reject { 5 } else { -1 });
         assert!(s.settled());
         assert!(!s.failed());
     }
