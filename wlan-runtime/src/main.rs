@@ -317,7 +317,7 @@ fn run() -> io::Result<()> {
     let origin = Instant::now();
     // Immutable build flag; a property read failure disables observation.
     let diagnostics_enabled =
-        rustutils::system_properties::read_bool("ro.debuggable", false).unwrap_or(false);
+        rustutils::android::system_properties::read_bool("ro.debuggable", false).unwrap_or(false);
     let shared = Arc::new(Mutex::new(Shared {
         observations: Observations::default(),
         uid: None,
