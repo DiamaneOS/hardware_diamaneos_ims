@@ -49,7 +49,7 @@ rust_library {
 rust_binary {
     name: "wlanreportd", srcs: ["wlan-runtime/src/main.rs"], edition: "2021",
     system_ext_specific: true,
-    rustlibs: ["libbinder_rs", "liblibc", "libdiamaneos_ims_dcm",
+    rustlibs: ["libbinder_rs", "liblibc", "librustutils", "libdiamaneos_ims_dcm",
         "libdiamaneos_ims_runtime", "libdiamaneos_wlan_reporting",
         "libdiamaneos_wlan_runtime", "de.diamaneos.wlan-rust"],
     init_rc: ["wlan-runtime/wlanreportd.rc"],
