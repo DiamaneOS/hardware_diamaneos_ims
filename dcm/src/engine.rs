@@ -5,7 +5,12 @@ use crate::protocol::{self as p, Activation, Family, Frame, Kind, PdnType};
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-pub const MAX_SESSIONS: usize = 79;
+// The authenticated stock DCM contract allocates PDP IDs in this inclusive range.
+const FIRST_SESSION_ID: u8 = 20;
+const LAST_SESSION_ID: u8 = 98;
+pub const MAX_SESSIONS: usize = (LAST_SESSION_ID - FIRST_SESSION_ID + 1) as usize;
+// Downstream containment budgets: keep normal IMS admission from consuming the
+// entire ID pool. Reservation does not bypass the independent four-client limit.
 const EMERGENCY_RESERVE: usize = 8;
 const MAX_CLIENTS: usize = 4;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -430,7 +435,9 @@ impl Engine {
         {
             return vec![Effect::Send(peer, p::response(f.txn, f.id, 1, 5))];
         }
-        let Some(id) = (20..=98).find(|id| !self.sessions.iter().any(|s| s.id == *id)) else {
+        let Some(id) = (FIRST_SESSION_ID..=LAST_SESSION_ID)
+            .find(|id| !self.sessions.iter().any(|s| s.id == *id))
+        else {
             return vec![Effect::Send(peer, p::response(f.txn, f.id, 1, 5))];
         };
         let key = Self::group_key(&a);

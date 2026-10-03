@@ -8,6 +8,16 @@ pub fn install() -> io::Result<()> {
     use libc::{sock_filter as F, sock_fprog};
     const LD: u16 = 0x20;
     const JEQ: u16 = 0x15;
+    // BPF_JMP | BPF_JSET | BPF_K
+    const JSET: u16 = 0x45;
+    // Linux audit.h/seccomp.h: native arm64 architecture and seccomp_data fields.
+    const AUDIT_ARCH_AARCH64: u32 = 0xc00000b7;
+    const SECCOMP_ARCH_OFFSET: u32 = 4;
+    const SECCOMP_SYSCALL_OFFSET: u32 = 0;
+    const SECCOMP_ARGUMENT0_OFFSET: u32 = 16;
+    const AF_QIPCRTR: u32 = 42; // Linux socket UAPI, QRTR-only creation
+    const NR_NEWFSTATAT: u32 = 79; // asm-generic/unistd.h
+    const NR_FSTAT: u32 = 80;
     const RET: u16 = 0x06;
     const KILL: u32 = 0x80000000;
     const ALLOW: u32 = 0x7fff0000;
@@ -17,13 +27,13 @@ pub fn install() -> io::Result<()> {
             code: LD,
             jt: 0,
             jf: 0,
-            k: 4,
+            k: SECCOMP_ARCH_OFFSET,
         },
         F {
             code: JEQ,
             jt: 1,
             jf: 0,
-            k: 0xc00000b7,
+            k: AUDIT_ARCH_AARCH64,
         },
         F {
             code: RET,
@@ -35,7 +45,7 @@ pub fn install() -> io::Result<()> {
             code: LD,
             jt: 0,
             jf: 0,
-            k: 0,
+            k: SECCOMP_SYSCALL_OFFSET,
         },
     ];
     // socket(2) is permitted for QRTR only; Binder is a file descriptor.
@@ -50,13 +60,13 @@ pub fn install() -> io::Result<()> {
             code: LD,
             jt: 0,
             jf: 0,
-            k: 16,
+            k: SECCOMP_ARGUMENT0_OFFSET,
         },
         F {
             code: JEQ,
             jt: 1,
             jf: 0,
-            k: 42,
+            k: AF_QIPCRTR,
         },
         F {
             code: RET,
@@ -84,10 +94,10 @@ pub fn install() -> io::Result<()> {
             code: LD,
             jt: 0,
             jf: 0,
-            k: 16,
+            k: SECCOMP_ARGUMENT0_OFFSET,
         },
         F {
-            code: 0x45,
+            code: JSET,
             jt: 1,
             jf: 0,
             k: libc::CLONE_THREAD as u32,
@@ -111,8 +121,8 @@ pub fn install() -> io::Result<()> {
         libc::SYS_writev,
         libc::SYS_close,
         libc::SYS_openat,
-        79, // __NR_newfstatat: asm-generic unistd.h
-        80, // __NR_fstat: asm-generic unistd.h
+        NR_NEWFSTATAT as libc::c_long,
+        NR_FSTAT as libc::c_long,
         libc::SYS_readlinkat,
         libc::SYS_faccessat,
         libc::SYS_lseek,

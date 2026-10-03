@@ -33,6 +33,9 @@ import de.diamaneos.wlan.ReporterStatus;
 public final class ObserverApp extends Application {
     private static final String SERVICE = "de.diamaneos.wlan.IReporter/default";
     private static final boolean DEBUG = Build.isDebuggable();
+    // Passive refresh: three missed heartbeats expire the reporter's 30s lease.
+    // Actual network callbacks and current-reporter death publish immediately.
+    private static final long HEARTBEAT_INTERVAL_MS = 10_000;
     private Handler handler;
     private ConnectivityManager connectivity;
     private WifiManager wifi;
@@ -46,7 +49,7 @@ public final class ObserverApp extends Application {
     private final Runnable heartbeat = new Runnable() {
         @Override public void run() {
             publish();
-            handler.postDelayed(this, 10_000);
+            handler.postDelayed(this, HEARTBEAT_INTERVAL_MS);
         }
     };
 

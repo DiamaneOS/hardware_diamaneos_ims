@@ -75,3 +75,20 @@ authority.
   native syscall-filter execution or modem and carrier behavior.
 - Simulated emergency scenarios verify only the implemented state/protocol
   boundaries, not real network fallback or responder location receipt.
+
+## Fixed values and downstream budgets
+
+- The PDP/session ID range 20–98 is the authenticated stock DCM contract.
+  Capacity derives from those inclusive endpoints.
+- Downstream containment choices: eight IDs reserved for emergency admission,
+  at most four modem clients. The reserve protects emergency space from normal
+  IMS exhaustion within the client limit. It cannot promise admission of
+  unlimited clients.
+- Wire message/TLV values, the QRTR family and arm64 seccomp offsets are fixed
+  protocol or Linux UAPI facts: named definitions with provenance, not
+  user-editable configuration. Modem node and slot count are product
+  configuration.
+- Change limits and timings only with their lifecycle, memory and
+  device-qualification effects reviewed together.
+
+## QRTR port reservation
