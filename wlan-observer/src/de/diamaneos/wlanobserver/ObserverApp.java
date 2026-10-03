@@ -229,6 +229,14 @@ public final class ObserverApp extends Application {
                                 + "/" + status.secondaryProfileRejectedMessages
                                 + " profile-unmapped=" + status.primaryProfileUnmappedSelections
                                 + "/" + status.secondaryProfileUnmappedSelections;
+                        summary += " profile-reports=" + status.primaryProfileReportsSent
+                                + "/" + status.primaryProfileReportsAcknowledged
+                                + "/" + status.primaryProfileReportsError
+                                + "/" + status.primaryProfileReportsCancelled + ","
+                                + status.secondaryProfileReportsSent
+                                + "/" + status.secondaryProfileReportsAcknowledged
+                                + "/" + status.secondaryProfileReportsError
+                                + "/" + status.secondaryProfileReportsCancelled;
                     }
                     if (!summary.equals(lastStatus)) {
                         Log.i("WlanReporting", summary);

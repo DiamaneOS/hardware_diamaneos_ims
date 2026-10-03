@@ -160,7 +160,8 @@ fn continuous_control_traffic_cannot_starve_reply_deadlines_or_terminal_expiry()
             enabled: false,
             network: None,
         });
-        let [control, reply] = s.poll_cycle(now);
+        let [control, reply, profile] = s.poll_cycle(now);
+        assert!(profile.is_none());
         let control = control.unwrap();
         assert_eq!(control[3], 0x43);
         s.receive(&ack(&control));

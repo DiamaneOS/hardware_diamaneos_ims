@@ -223,7 +223,7 @@ and ordinary sessions do not collect these private profile observations.
 
 ## Offline profile ownership and unavailable measurements
 
-The pure `profiles` module is not connected to the runtime. It retains at most40
+The pure `profiles` module retains at most40
 entries per verified subscription context, keyed by type and normalized opaque
 measurement ID. Absent/explicit zero IDs share a key; nonzero IDs remain private.
 The limit is downstream containment, not a stock key-space limit. Exhaustion
@@ -252,3 +252,26 @@ reinitialization and context replacement invalidate old tokens; a late ACK canno
 mark the replacement reported. No identity or packet buffer may enter diagnostics.
 Runtime transport, retry/fairness handling, observation loss and qualified positive
 measurement policy are separate integration work.
+
+The private experiment now connects unavailable completions through a separate
+pending-request channel. It is selected only by the private registration compile
+flag AND the immutable debug-build flag. Ordinary sessions never collect or send
+these optional profile results. Both subscription clients and their replacements
+use one checked process-wide context-generation allocator; process exit drops all
+tokens. Unsupported lifecycle input blocks the optional channel until replacement.
+
+Each context has at most one pending reply with three attempts and a two-second
+deadline. Every transport cycle advances core, keepalive and profile deadlines,
+emitting at most three packets in that priority order. All channels share the
+nonwrapping transaction allocator. A profile0 connectivity reply and a nondefault
+profile reply have the same message ID but different matched transactions. Selection
+removal cancels an unsent retry; its old ACK cannot complete a reinitialized entry.
+Negative ACK or timeout blocks optional reporting without claiming core failure.
+Transaction exhaustion requests the existing bounded session-renewal path only
+after allocated core work drains, preserving packets already allocated that cycle.
+
+Private diagnostics expose only sent/acknowledged/cancelled counts and an error
+category. No measurement ID, thresholds, payload or subscriber data are logged.
+This completes truthful unavailable-result handling, not measured quality or VoWiFi
+readiness. Firmware acceptance, cellular/WLAN recovery and carrier effects still
+require native testing. The diagnostic build must not be promoted as release ready.

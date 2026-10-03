@@ -23,7 +23,7 @@ use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
     time::{Duration, Instant},
@@ -31,6 +31,8 @@ use std::{
 
 const SERVICE: &str = "de.diamaneos.wlan.IReporter/default";
 static STOP: AtomicBool = AtomicBool::new(false);
+// Globally unique in this process across both subscriptions and replacements.
+static NEXT_PROFILE_CONTEXT: AtomicU64 = AtomicU64::new(1);
 extern "C" fn stop(_: libc::c_int) {
     STOP.store(true, Ordering::Relaxed);
 }
@@ -102,6 +104,14 @@ impl IReporter for Service {
             secondaryProfileRejectedMessages: s.status.secondaryProfileRejectedMessages,
             primaryProfileUnmappedSelections: s.status.primaryProfileUnmappedSelections,
             secondaryProfileUnmappedSelections: s.status.secondaryProfileUnmappedSelections,
+            primaryProfileReportsSent: s.status.primaryProfileReportsSent,
+            primaryProfileReportsAcknowledged: s.status.primaryProfileReportsAcknowledged,
+            primaryProfileReportsCancelled: s.status.primaryProfileReportsCancelled,
+            primaryProfileReportsError: s.status.primaryProfileReportsError,
+            secondaryProfileReportsSent: s.status.secondaryProfileReportsSent,
+            secondaryProfileReportsAcknowledged: s.status.secondaryProfileReportsAcknowledged,
+            secondaryProfileReportsCancelled: s.status.secondaryProfileReportsCancelled,
+            secondaryProfileReportsError: s.status.secondaryProfileReportsError,
         })
     }
     fn registerObserver(&self, lifetime: &SpIBinder) -> binder::Result<i64> {
@@ -224,7 +234,13 @@ impl Client {
             socket,
             endpoint: None,
             state: if cfg!(private_dsd_registration) && diagnostics_enabled {
-                Session::new_with_diagnostic_registration(subscription).unwrap()
+                let generation = NEXT_PROFILE_CONTEXT
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                        value.checked_add(1)
+                    })
+                    .map_err(|_| io::Error::other("profile context exhausted"))?;
+                Session::new_with_diagnostic_profile_reporting(subscription, generation)
+                    .ok_or_else(|| io::Error::other("profile context invalid"))?
             } else {
                 Session::new(subscription).unwrap()
             },
@@ -404,6 +420,7 @@ fn run() -> io::Result<()> {
                 let (responses, indications, message) = client.headers.snapshot();
                 let keepalive = client.state.keepalive_diagnostics();
                 let profile = client.state.profile_diagnostics();
+                let reports = client.state.profile_report_diagnostics();
                 if index == 0 {
                     s.status.primaryResponseHeaders = responses;
                     s.status.primaryIndicationHeaders = indications;
@@ -433,6 +450,13 @@ fn run() -> io::Result<()> {
                             i64::from(profile.rejected_messages);
                         s.status.primaryProfileUnmappedSelections =
                             i64::from(profile.unmapped_selections);
+                        s.status.primaryProfileReportsSent =
+                            reports.sent.min(i64::MAX as u64) as i64;
+                        s.status.primaryProfileReportsAcknowledged =
+                            reports.acknowledged.min(i64::MAX as u64) as i64;
+                        s.status.primaryProfileReportsCancelled =
+                            reports.cancelled.min(i64::MAX as u64) as i64;
+                        s.status.primaryProfileReportsError = reports.error;
                     }
                 } else {
                     s.status.secondaryResponseHeaders = responses;
@@ -463,6 +487,13 @@ fn run() -> io::Result<()> {
                             i64::from(profile.rejected_messages);
                         s.status.secondaryProfileUnmappedSelections =
                             i64::from(profile.unmapped_selections);
+                        s.status.secondaryProfileReportsSent =
+                            reports.sent.min(i64::MAX as u64) as i64;
+                        s.status.secondaryProfileReportsAcknowledged =
+                            reports.acknowledged.min(i64::MAX as u64) as i64;
+                        s.status.secondaryProfileReportsCancelled =
+                            reports.cancelled.min(i64::MAX as u64) as i64;
+                        s.status.secondaryProfileReportsError = reports.error;
                     }
                 }
             }
