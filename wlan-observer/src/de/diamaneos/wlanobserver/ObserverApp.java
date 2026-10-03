@@ -183,7 +183,11 @@ public final class ObserverApp extends Application {
                 IBinder token = new Binder();
                 long epoch = next.registerObserver(token);
                 found.linkToDeath(() -> handler.post(() -> {
-                    if (binder == found) { reporter = null; binder = null; lifetime = null; }
+                    if (binder == found) {
+                        reporter = null; binder = null; lifetime = null;
+                        handler.removeCallbacks(heartbeat);
+                        handler.post(heartbeat);
+                    }
                 }), 0);
                 binder = found; reporter = next; lifetime = token; generation = epoch; sequence = 0;
                 lastStatus = null;
