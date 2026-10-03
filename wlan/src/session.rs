@@ -42,6 +42,8 @@ struct Pending {
 
 pub struct Session {
     subscription: u32,
+    bound: bool,
+    keepalive_failures: crate::keepalive::Failures,
     diagnostic_registration: bool,
     next_transaction: u16,
     step: Step,
@@ -73,6 +75,8 @@ impl Session {
     pub fn new(subscription: u32) -> Option<Self> {
         (1..=2).contains(&subscription).then_some(Self {
             subscription,
+            bound: false,
+            keepalive_failures: Default::default(),
             diagnostic_registration: false,
             next_transaction: 1,
             step: Step::Bind,
@@ -162,9 +166,44 @@ impl Session {
         }
     }
 
+    pub fn keepalive_diagnostics(&self) -> crate::keepalive::Diagnostics {
+        self.keepalive_failures.diagnostics()
+    }
+
     /// Retries preserve transaction and payload. Exhaustion requires a fresh
     /// QRTR endpoint; this instance never wraps and reuses a transaction ID.
     pub fn poll(&mut self, now_ms: u64) -> Option<Vec<u8>> {
+        self.poll_control(now_ms)
+    }
+
+    /// Bounded transport cycle. Send both present packets in order: connectivity
+    /// first, then optional completion. Both deadline machines advance even when
+    /// control emits continuously; neither result is discarded or speculative.
+    pub fn poll_cycle(&mut self, now_ms: u64) -> [Option<Vec<u8>>; 2] {
+        let control = self.poll_control(now_ms);
+        let reply = if self.bound {
+            self.keepalive_failures
+                .poll(now_ms, &mut self.next_transaction)
+        } else {
+            None
+        };
+        // A final allocated connectivity packet must still be sent and tracked.
+        // Renew only after its ACK/retries drain; optional exhaustion cannot
+        // discard an in-flight withdrawal or consume its transaction.
+        if self.keepalive_failures.diagnostics().error == -2
+            && self.pending.is_none()
+            && !self.failed()
+        {
+            self.failed_operation = crate::NAT_KEEPALIVE_OPERATION_STATUS;
+            self.error = -2;
+            self.pending = None;
+            self.step = Step::Failed;
+            return [None, None];
+        }
+        [control, reply]
+    }
+
+    fn poll_control(&mut self, now_ms: u64) -> Option<Vec<u8>> {
         if let Some(pending) = &mut self.pending {
             if now_ms < pending.deadline {
                 return None;
@@ -183,7 +222,7 @@ impl Session {
             {
                 self.pending = None;
                 self.step = self.update_start();
-                return self.poll(now_ms);
+                return self.poll_control(now_ms);
             }
             if pending.attempts >= MAX_ATTEMPTS {
                 self.failed_operation = pending.message;
@@ -206,18 +245,18 @@ impl Session {
             && self.sending.as_ref() != Some(&self.desired)
         {
             self.step = self.update_start();
-            return self.poll(now_ms);
+            return self.poll_control(now_ms);
         }
         if self.acknowledged_switch == Some(self.desired.enabled) {
             match self.step {
                 Step::Switch => {
                     self.sending = Some(self.desired.clone());
                     self.step = Step::Profile;
-                    return self.poll(now_ms);
+                    return self.poll_control(now_ms);
                 }
                 Step::WithdrawSwitch => {
                     self.step = self.settle_update();
-                    return self.poll(now_ms);
+                    return self.poll_control(now_ms);
                 }
                 _ => {}
             }
@@ -260,7 +299,7 @@ impl Session {
                 // precedence over the old connected snapshot.
                 if self.sending.as_ref() != Some(&self.desired) {
                     self.step = self.update_start();
-                    return self.poll(now_ms);
+                    return self.poll_control(now_ms);
                 }
                 let packet = match self.sending.as_ref().and_then(|s| s.network.as_ref()) {
                     Some(network) => network.encode(tx),
@@ -273,7 +312,7 @@ impl Session {
                 // default-profile update before station reporting.
                 if self.sending.as_ref() != Some(&self.desired) {
                     self.step = self.update_start();
-                    return self.poll(now_ms);
+                    return self.poll_control(now_ms);
                 }
                 let connected_default = self
                     .sending
@@ -306,6 +345,9 @@ impl Session {
     /// Malformed/unrelated packets cannot consume the pending request. A valid
     /// negative result does consume it and fails this session explicitly.
     pub fn receive(&mut self, bytes: &[u8]) {
+        if self.bound && self.keepalive_failures.receive(bytes) {
+            return;
+        }
         let Some(p) = &self.pending else {
             return;
         };
@@ -321,6 +363,9 @@ impl Session {
             Err(_) => return,
         }
         self.pending = None;
+        if self.step == Step::Bind {
+            self.bound = true;
+        }
         if matches!(self.step, Step::Switch | Step::WithdrawSwitch) {
             self.acknowledged_switch = self.sending.as_ref().map(|s| s.enabled);
         }
@@ -339,5 +384,39 @@ impl Session {
             Step::WithdrawStatus => Step::WithdrawSwitch,
             _ => Step::Failed,
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_exhaustion_preserves_the_last_control_request_and_retries() {
+        let mut session = Session::new(1).unwrap();
+        session.bound = true;
+        session.step = Step::WithdrawProfile;
+        session.next_transaction = u16::MAX - 1;
+        session.receive(&[4, 0, 0, 0x41, 0, 4, 0, 1, 1, 0, 1]);
+        let [control, optional] = session.poll_cycle(0);
+        let control = control.unwrap();
+        assert_eq!(control[3], DEFAULT_PROFILE_STATUS as u8);
+        assert_eq!(&control[1..3], &(u16::MAX - 1).to_le_bytes());
+        assert!(optional.is_none());
+        assert!(!session.failed());
+        assert_eq!(session.keepalive_diagnostics().error, -2);
+        assert_eq!(session.pending.as_ref().unwrap().transaction, u16::MAX - 1);
+        let [retry, optional] = session.poll_cycle(2000);
+        assert_eq!(retry.unwrap(), control);
+        assert!(optional.is_none());
+        assert!(!session.failed());
+        session.receive(&[
+            2, control[1], control[2], control[3], 0, 7, 0, 2, 4, 0, 0, 0, 0, 0,
+        ]);
+        assert!(session.step == Step::WithdrawStatus);
+        assert!(session.pending.is_none());
+        assert!(session.poll_cycle(2001).into_iter().all(|p| p.is_none()));
+        assert!(session.failed());
+        assert_eq!(session.next_transaction, u16::MAX);
     }
 }

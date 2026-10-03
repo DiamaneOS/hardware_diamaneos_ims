@@ -13,8 +13,11 @@ pub const WLAN_STATUS: u16 = 0x20;
 pub const BIND_SUBSCRIPTION: u16 = 0x27;
 pub const DATA_SETTINGS: u16 = 0x34;
 pub const INDICATION_REGISTRATION: u16 = 0x38;
+pub const NAT_KEEPALIVE_INDICATION: u16 = 0x41;
+pub const NAT_KEEPALIVE_OPERATION_STATUS: u16 = 0x42;
 pub const DEFAULT_PROFILE_STATUS: u16 = 0x43;
 
+pub mod keepalive;
 pub mod session;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -228,6 +231,50 @@ pub fn diagnostic_notification_registration(transaction: u16) -> Result<Vec<u8>,
     request(transaction, INDICATION_REGISTRATION, body)
 }
 
+/// A structurally valid stock keepalive instruction. Endpoints and timer values
+/// are neither interpreted nor retained: the adapter cannot perform this operation.
+/// The authenticated runtime must establish the current bound modem peer first.
+pub fn keepalive_instruction(bytes: &[u8]) -> bool {
+    // Stock IDL: at most47 body bytes. Required operation byte, optional
+    // destination IPv4/IPv6, destination/source ports and timer. No extensions.
+    if bytes.len() > 54 {
+        return false;
+    }
+    let Ok(frame) = Frame::parse(bytes) else {
+        return false;
+    };
+    if frame.kind != Kind::Indication
+        || frame.id != NAT_KEEPALIVE_INDICATION
+        || frame.tlv(1).is_none_or(|value| value.len() != 1)
+    {
+        return false;
+    }
+    let mut rest = &bytes[7..];
+    while !rest.is_empty() {
+        let expected = match rest[0] {
+            1 => 1,
+            0x10 | 0x14 => 4,
+            0x11 => 16,
+            0x12 | 0x13 => 2,
+            _ => return false,
+        };
+        let length = u16::from_le_bytes([rest[1], rest[2]]) as usize;
+        if length != expected {
+            return false;
+        }
+        rest = &rest[3 + length..];
+    }
+    true
+}
+
+/// Stock maps a failed operation to uint32 1. This does not name an unsupported
+/// enum, claim successful cancellation, echo an endpoint or emit keepalive traffic.
+pub fn keepalive_operation_failed(transaction: u16) -> Result<Vec<u8>, Error> {
+    let mut body = Vec::with_capacity(7);
+    tlv(&mut body, 1, &1_u32.to_le_bytes());
+    request(transaction, NAT_KEEPALIVE_OPERATION_STATUS, body)
+}
+
 /// Stock's default connectivity profile only; not a signal/throughput measurement
 /// and never a caller-selected profile. IDL: required uint32 profile, optional
 /// uint32 status (0 met, 1 not met). The stock default profile is always ID 0.
@@ -289,6 +336,7 @@ pub fn response_for(bytes: &[u8], expected_transaction: u16, message: u16) -> Re
             | BIND_SUBSCRIPTION
             | DATA_SETTINGS
             | INDICATION_REGISTRATION
+            | NAT_KEEPALIVE_OPERATION_STATUS
             | DEFAULT_PROFILE_STATUS
     ) || parsed.kind != Kind::Response
         || parsed.id != message
