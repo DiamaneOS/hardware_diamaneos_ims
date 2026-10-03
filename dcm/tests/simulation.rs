@@ -133,11 +133,34 @@ fn dual_family_shares_network_and_releases_last_reference() {
 #[test]
 fn deactivation_completes_the_original_context_before_replacement() {
     let mut e = connected();
-    let activation = e.receive(MODEM, &activate(1, 1, 1, false, 0));
+    let packet = activate(1, 1, 1, false, 0);
+    let original = Frame::parse(&packet).unwrap();
+    let mut owned = Encoder::new(Kind::Request, 1, ACTIVATE);
+    owned.tlv(1, original.required(1).unwrap()).unwrap();
+    owned.tlv(0x10, &9u32.to_le_bytes()).unwrap();
+    owned.tlv(0x12, original.required(0x12).unwrap()).unwrap();
+    owned.tlv(0x13, &7u32.to_le_bytes()).unwrap();
+    let packet = owned.finish();
+    let activation = e.receive(MODEM, &packet);
     let id = pdp(&activation);
     let old_request = request(&activation);
     e.report(old_request, Some(network()));
-    let out = e.receive(MODEM, &deactivate(id));
+    // A repeated activation replaces the cookie, but retains the same owned context.
+    let original = Frame::parse(&packet).unwrap();
+    let mut refreshed = Encoder::new(Kind::Request, 2, ACTIVATE);
+    for tag in [1, 0x12, 0x13] {
+        refreshed.tlv(tag, original.required(tag).unwrap()).unwrap();
+    }
+    refreshed.tlv(0x10, &42u32.to_le_bytes()).unwrap();
+    let repeat = e.receive(MODEM, &refreshed.finish());
+    assert_eq!(pdp(&repeat), id);
+    assert!(!repeat
+        .iter()
+        .any(|effect| matches!(effect, Effect::BringUp(_))));
+    let mut release = Encoder::new(Kind::Request, 55, DEACTIVATE);
+    release.tlv(1, &[id]).unwrap();
+    release.tlv(0x10, &7u32.to_le_bytes()).unwrap();
+    let out = e.receive(MODEM, &release.finish());
     assert_eq!(out.len(), 3);
     let Effect::Send(to, response) = &out[0] else {
         panic!()
@@ -149,6 +172,7 @@ fn deactivation_completes_the_original_context_before_replacement() {
         (Kind::Response, DEACTIVATE, 55)
     );
     assert_eq!(response.tlv(0x10), Some([250].as_slice()));
+    assert_eq!(response.tlv(0x11), Some(7u32.to_le_bytes().as_slice()));
     assert!(matches!(out[1], Effect::Release(r) if r == old_request));
     let Effect::Send(to, terminal) = &out[2] else {
         panic!()
@@ -158,7 +182,8 @@ fn deactivation_completes_the_original_context_before_replacement() {
     assert_eq!((terminal.kind, terminal.id), (Kind::Indication, ACTIVATE));
     assert_eq!(terminal.tlv(1), Some([id].as_slice()));
     assert_eq!(terminal.tlv(2), Some([0, 0, 13, 0].as_slice()));
-    assert_eq!(terminal.tlv(0x10), Some(9u32.to_le_bytes().as_slice()));
+    assert_eq!(terminal.tlv(0x10), Some(42u32.to_le_bytes().as_slice()));
+    assert_eq!(terminal.tlv(0x12), Some(7u32.to_le_bytes().as_slice()));
     assert!(terminal.tlv(0x11).is_none()); // No stale address in a terminal result.
     assert_eq!(e.session_count(), 0);
     assert!(e.report(old_request, Some(network())).is_empty());
@@ -185,11 +210,16 @@ fn deactivation_notification_is_owner_scoped_and_preserves_shared_bearer() {
     wrong_instance.tlv(0x10, &1u32.to_le_bytes()).unwrap();
     assert_eq!(e.receive(MODEM, &wrong_instance.finish()).len(), 1);
     assert_eq!(e.session_count(), 2);
+    assert_eq!(e.report(request(&first), Some(network())).len(), 2);
     let out = e.receive(MODEM, &deactivate(id));
     assert_eq!(out.len(), 2); // Response, terminal result; shared bearer remains requested.
     assert!(!out.iter().any(|x| matches!(x, Effect::Release(_))));
     assert_eq!(e.session_count(), 1);
     let up = e.report(request(&first), Some(network()));
+    assert!(up.is_empty()); // Survivor keeps its existing address; no redundant UP notice.
+    let mut changed = network();
+    changed.v6 = Some("2001:db8::2".parse().unwrap());
+    let up = e.report(request(&first), Some(changed));
     assert_eq!(up.len(), 1);
     let Effect::Send(to, bytes) = &up[0] else {
         panic!()
