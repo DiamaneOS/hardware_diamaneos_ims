@@ -175,3 +175,35 @@ without retaining instruction data. Rejection/timeout blocks this optional
 reply channel until context replacement; transaction exhaustion requires a new
 session. This closes a missing failure contract, not keepalive functionality or
 nondefault quality-profile support. Native carrier effect remains unqualified.
+
+## Profile notification observations
+
+The pure `profile_notice` decoder validates the authenticated FP6.QREL.16.111.0
+DSD initialization indication `0x45` and selection indication `0x3f`. It is not
+connected to the runtime and sends no request or quality result. These messages
+are separate from the fixed default connectivity profile.
+
+Initialization has a required little-endian uint32 type, observed types4–43,
+and a maximum62-byte body. Optional RSSI threshold fields10/11,14/15,16/17 are
+two bytes each; optional12 is a count byte followed by at most10 SIM-identifier
+bytes; optional13 is an eight-byte opaque measurement identifier. Selection has
+a required little-endian uint64 mask and a maximum36-byte body; optional10 is a
+count byte followed by at most10 bytes of unestablished meaning, and optional11
+is an eight-byte opaque measurement identifier. Unknown TLVs, duplicate TLVs,
+truncation, wrong widths and wrong framing are rejected.
+
+The stock selection consumer maps bits32–63 to types4–35, bits3–9 to types36–42,
+and bit16 to type43. The decoder preserves only that known selection subset and
+whether other bits were present; it assigns no meaning to those other bits.
+Initialization returns only the type. Optional identifiers and thresholds are
+validated for wire shape but never copied, interpreted, stored or logged.
+This is structural validation, not validation of threshold units/ranges or
+subscriber identity.
+
+An observed initialization or set selection bit does not prove an active profile,
+its acceptance, a measured result, or carrier preference. Stock keys profiles by
+client, opaque measurement identifier and type. This decoder intentionally drops
+that identity, so its output must not be used as a profile registry or to send a
+result. A future implementation needs bounded, private identity/lifecycle handling
+and qualified measurements before adding that behavior. The caller must establish
+the current bound modem endpoint before consuming any observation.

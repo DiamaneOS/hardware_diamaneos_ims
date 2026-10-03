@@ -18,6 +18,7 @@ pub const NAT_KEEPALIVE_OPERATION_STATUS: u16 = 0x42;
 pub const DEFAULT_PROFILE_STATUS: u16 = 0x43;
 
 pub mod keepalive;
+pub mod profile_notice;
 pub mod session;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
