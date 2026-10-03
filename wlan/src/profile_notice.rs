@@ -8,6 +8,72 @@ const INITIALIZE: u16 = 0x45;
 const SELECT: u16 = 0x3f;
 const KNOWN_SELECTION_BITS: u64 = 0xffff_ffff_0001_03f8;
 
+/// Fixed observation histograms, reset with the authenticated modem context.
+/// Repeats and distinct measurement identities collapse; never infer active state.
+#[derive(Clone, Debug)]
+pub struct Counters {
+    initialized: [u32; 40],
+    selected: [u32; 40],
+    pub selection_messages: u32,
+    pub rejected_messages: u32,
+    pub unmapped_selections: u32,
+}
+
+impl Default for Counters {
+    fn default() -> Self {
+        Self {
+            initialized: [0; 40],
+            selected: [0; 40],
+            selection_messages: 0,
+            rejected_messages: 0,
+            unmapped_selections: 0,
+        }
+    }
+}
+
+impl Counters {
+    pub fn initialization_counts(&self) -> &[u32; 40] {
+        &self.initialized
+    }
+
+    pub fn selection_counts(&self) -> &[u32; 40] {
+        &self.selected
+    }
+
+    // Called only for a current authenticated, bound private-diagnostic context.
+    // Consuming an indication never consumes the core's pending request/ACK.
+    pub(crate) fn observe(&mut self, bytes: &[u8]) -> bool {
+        if bytes.len() < 5
+            || bytes[0] != Kind::Indication as u8
+            || !matches!(
+                u16::from_le_bytes([bytes[3], bytes[4]]),
+                INITIALIZE | SELECT
+            )
+        {
+            return false;
+        }
+        match Notice::parse(bytes) {
+            Some(Notice::Initialized(profile)) => {
+                let count = &mut self.initialized[usize::from(profile - 4)];
+                *count = count.saturating_add(1);
+            }
+            Some(Notice::Selected(selection)) => {
+                self.selection_messages = self.selection_messages.saturating_add(1);
+                if selection.has_unmapped_bits() {
+                    self.unmapped_selections = self.unmapped_selections.saturating_add(1);
+                }
+                for (index, count) in self.selected.iter_mut().enumerate() {
+                    if selection.contains(index as u8 + 4) {
+                        *count = count.saturating_add(1);
+                    }
+                }
+            }
+            None => self.rejected_messages = self.rejected_messages.saturating_add(1),
+        }
+        true
+    }
+}
+
 /// Non-identifying facts from one validated notification. There is deliberately
 /// no measurement key: observations cannot establish which profiles are active.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
