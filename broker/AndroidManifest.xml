@@ -32,5 +32,10 @@
         android:persistent="true"
         android:directBootAware="true"
         android:defaultToDeviceProtectedStorage="true"
-        android:allowBackup="false" />
+        android:allowBackup="false">
+        <!-- These network callbacks do not use physical sensors. This opts out
+             of DiamaneOS's implicit compatibility request, not explicit grants. -->
+        <meta-data android:name="de.diamaneos.permission.NO_IMPLICIT_OTHER_SENSORS"
+            android:value="true" />
+    </application>
 </manifest>
