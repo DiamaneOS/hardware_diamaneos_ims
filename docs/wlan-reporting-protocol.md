@@ -220,3 +220,35 @@ Repeated messages and different measurement contexts collapse; counts must never
 drive a quality response or establish active/accepted profile state. Types/counts
 still disclose limited modem policy/activity. Release builds omit status logging,
 and ordinary sessions do not collect these private profile observations.
+
+## Offline profile ownership and unavailable measurements
+
+The pure `profiles` module is not connected to the runtime. It retains at most40
+entries per verified subscription context, keyed by type and normalized opaque
+measurement ID. Absent/explicit zero IDs share a key; nonzero IDs remain private.
+The limit is downstream containment, not a stock key-space limit. Exhaustion
+rejects new initialization without evicting existing entries. Duplicate
+initialization is ignored. Neither thresholds nor SIM bytes are retained.
+
+Selection starts only previously initialized entries for that measurement ID.
+Cleared known bits destroy those entries, including unstarted ones. There is no
+invented teardown status, and a later selection requires initialization again.
+Unknown bits are rejected before mutation, a conservative difference from stock's
+known-bit-only dispatch. A runtime must stop/invalidate the optional reporting
+channel on unsupported lifecycle input, rather than preserve a stale positive
+assessment. Malformed and overflow cases also need explicit runtime handling.
+
+A selected entry can yield a private report token. It encodes only request0x43
+with QUALITY_NOT_MET1 and CQ_FAIL_INCONCLUSIVE3; it cannot encode positive quality.
+Measurement ID TLV12 is included only when nonzero. Unknown band is omitted.
+This declares unavailable qualified measurements, not measured link failure or
+offload success. Native modem acceptance and calling effect remain untested.
+
+Tokens carry entry revision and a runtime-owned context generation. Generations
+must be globally unique across both subscriptions and never reused; stop on
+exhaustion. Revalidate a token before sending or retrying. Match the exact pending
+transaction and current endpoint/generation before acknowledging it. Destruction,
+reinitialization and context replacement invalidate old tokens; a late ACK cannot
+mark the replacement reported. No identity or packet buffer may enter diagnostics.
+Runtime transport, retry/fairness handling, observation loss and qualified positive
+measurement policy are separate integration work.
