@@ -117,6 +117,8 @@ pub struct Diagnostics {
     pub broker_registrations: u64,
     pub broker_losses: u64,
     pub client_losses: u64,
+    // Live clients whose sessions ended after their output stalled.
+    pub client_stalls: u64,
     pub modem_losses: u64,
     pub publisher_conflicts: u64,
     pub publication_active: bool,
@@ -429,6 +431,15 @@ impl Engine {
         self.sessions.retain(|s| s.peer != peer);
         self.indications.remove(&peer);
         self.release_unused()
+    }
+    /// Backpressure from a client that has not gone: end its sessions with
+    /// terminal results before releasing their requests. Its lifetime stays
+    /// tracked so those results can still be delivered.
+    pub fn peer_stalled(&mut self, peer: Peer) -> Vec<Effect> {
+        if self.sessions.iter().any(|s| s.peer == peer) {
+            self.diagnostics.client_stalls = self.diagnostics.client_stalls.saturating_add(1);
+        }
+        self.fail_matching(|s| s.peer == peer)
     }
     pub fn node_gone(&mut self, node: u32) -> Vec<Effect> {
         if node == self.modem_node {
