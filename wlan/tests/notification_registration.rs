@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-use diamaneos_wlan_reporting::{notification_registration, session::Session, Error};
+use diamaneos_wlan_reporting::{
+    notification_registration, session::Session, Error, DEFAULT_PROFILE_STATUS,
+};
 
 fn ack(request: &[u8]) -> [u8; 14] {
     [
@@ -32,7 +34,7 @@ fn notification_registration_is_acknowledged_before_normal_reconciliation() {
         assert!(session.poll(2).is_none());
         session.receive(&ack(&registration));
         let clear = session.poll(3).unwrap();
-        assert_eq!(clear[3], 0x20);
+        assert_eq!(u16::from(clear[3]), DEFAULT_PROFILE_STATUS);
         session.receive(&ack(&registration));
         assert!(session.poll(4).is_none());
     }
