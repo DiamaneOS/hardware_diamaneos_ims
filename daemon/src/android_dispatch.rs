@@ -9,7 +9,7 @@ use diamaneos_ims_dcm::{
 use diamaneos_ims_runtime::{
     outbox::{Attempt, Finished, Outbox},
     socket::Qrtr,
-    transport::{classify, Fault},
+    transport::{classify, exhausted, Fault},
 };
 use std::{collections::VecDeque, io};
 use vendor_diamaneos_hardware_imsdcm::aidl::vendor::diamaneos::hardware::imsdcm::IPdnBroker::IPdnBroker;
@@ -135,7 +135,11 @@ impl Dispatch {
                             Err(error) => match classify(&error) {
                                 // There is no admitted session to retire or
                                 // lifetime to queue; caller may retry its request.
-                                Fault::Retry | Fault::PeerGone => (),
+                                Fault::Retry | Fault::PeerGone => {
+                                    if exhausted(&error) {
+                                        engine.transport_exhausted();
+                                    }
+                                }
                                 Fault::SocketReset => self.socket_reset = true,
                                 Fault::Unexpected => return Err(error),
                             },
@@ -239,6 +243,7 @@ impl Dispatch {
             let mut fatal = None;
             let mut broker_lost = None;
             let mut socket_reset = false;
+            let mut exhaustion = false;
             let finished = self.queue.attempt(
                 now,
                 |_, work| match work {
@@ -255,7 +260,10 @@ impl Dispatch {
                         match socket.send(packet.peer(), &bytes) {
                             Ok(()) => Attempt::Submitted,
                             Err(error) => match classify(&error) {
-                                Fault::Retry => Attempt::Backpressured,
+                                Fault::Retry => {
+                                    exhaustion = exhausted(&error);
+                                    Attempt::Backpressured
+                                }
                                 Fault::PeerGone => Attempt::PeerLost,
                                 Fault::SocketReset => {
                                     socket_reset = true;
@@ -289,6 +297,9 @@ impl Dispatch {
                     }
                 },
             );
+            if exhaustion {
+                engine.transport_exhausted();
+            }
             if broker_lost.is_some() {
                 self.broker_lost = broker_lost;
             }

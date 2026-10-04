@@ -120,6 +120,8 @@ pub struct Diagnostics {
     pub modem_losses: u64,
     pub publisher_conflicts: u64,
     pub publication_active: bool,
+    // QRTR buffer or memory exhaustion; the affected work is retried, not failed.
+    pub transport_exhaustion: u64,
 }
 /// Device configuration fixes the modem node and number of slots; no first-packet trust.
 pub struct Engine {
@@ -160,6 +162,10 @@ impl Engine {
     }
     pub fn publication_active(&mut self, active: bool) {
         self.diagnostics.publication_active = active;
+    }
+    pub fn transport_exhausted(&mut self) {
+        self.diagnostics.transport_exhaustion =
+            self.diagnostics.transport_exhaustion.saturating_add(1);
     }
     pub fn session_count(&self) -> usize {
         self.sessions.len()
