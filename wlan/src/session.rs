@@ -389,10 +389,13 @@ impl Session {
         }
         self.step = match self.step {
             Step::Bind => Step::RegisterNotifications,
-            Step::RegisterNotifications => Step::Clear,
-            Step::Clear => Step::ClearProfile,
-            Step::ClearProfile if !self.has_observation => Step::AwaitObservation,
-            Step::ClearProfile => self.update_start(),
+            // Revoke a previous positive profile before withdrawing station
+            // state, matching ordinary loss. Preserve both acknowledgements
+            // before authenticated observations can replay connectivity.
+            Step::RegisterNotifications => Step::ClearProfile,
+            Step::ClearProfile => Step::Clear,
+            Step::Clear if !self.has_observation => Step::AwaitObservation,
+            Step::Clear => self.update_start(),
             // Stock's runtime callback reports the current default profile
             // before STA on both positive and negative paths. Availability is
             // still confirmed only after the final station acknowledgement.
