@@ -232,7 +232,7 @@ impl Qrtr {
                     continue;
                 }
                 if let Some(c) = Control::decode(&data) {
-                    if c.conflicting_server() {
+                    if c.conflicts_with(self.local) {
                         self.control(Control::lookup(DEL_LOOKUP))?;
                         return Ok(Publication::Conflict);
                     }

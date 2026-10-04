@@ -579,13 +579,22 @@ fn timezone_echo_and_negative_offset_are_exact() {
 }
 
 #[test]
-fn conflict_watch_ignores_self_and_rejects_competing_publishers() {
+fn conflict_watch_ignores_self_and_remote_nodes_and_rejects_local_publishers() {
     use diamaneos_ims_dcm::qrtr::*;
     let local = Peer { node: 1, port: 900 };
+    // The daemon's own record, also a stale one for the same fixed port.
     assert!(!Control::server(NEW_SERVER, local).conflicts_with(local));
+    assert!(!Control::server(NEW_SERVER, local).remote_server(local));
     assert!(Control::server(NEW_SERVER, Peer { node: 1, port: 901 }).conflicts_with(local));
-    assert!(Control::server(NEW_SERVER, Peer { node: 3, port: 900 }).conflicts_with(local));
+    let remote = Control::server(NEW_SERVER, Peer { node: 3, port: 900 });
+    assert!(!remote.conflicts_with(local));
+    assert!(remote.remote_server(local));
     assert!(!Control::server(DEL_SERVER, MODEM).conflicts_with(local));
+    assert!(!Control::server(DEL_SERVER, MODEM).remote_server(local));
+    let complete = Control::decode(&[4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert!(complete.is_some_and(|c| c.lookup_complete()
+        && !c.conflicts_with(local)
+        && !c.remote_server(local)));
 }
 
 #[test]

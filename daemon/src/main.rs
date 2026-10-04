@@ -384,6 +384,10 @@ fn run() -> io::Result<()> {
                             engine.publisher_conflict();
                             vec![] // Preserve live clients; ownership is a separate kernel gate.
                         }
+                        Some(c) if c.remote_server(socket.local()) => {
+                            engine.remote_publisher();
+                            vec![]
+                        }
                         Some(c) if c.command == DEL_CLIENT => {
                             let lost = c.deleted_client().unwrap();
                             dispatch.purge_peer(&mut engine, broker.as_ref(), lost);
