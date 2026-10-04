@@ -122,6 +122,8 @@ pub struct Diagnostics {
     pub publication_active: bool,
     // QRTR buffer or memory exhaustion; the affected work is retried, not failed.
     pub transport_exhaustion: u64,
+    // Oneway calls a live broker did not receive (not broker deaths).
+    pub broker_call_failures: u64,
 }
 /// Device configuration fixes the modem node and number of slots; no first-packet trust.
 pub struct Engine {
@@ -383,6 +385,22 @@ impl Engine {
             out.extend(self.fail_matching(|s| s.peer == peer));
         }
         out
+    }
+    /// A oneway bring-up the live broker did not receive can never be answered
+    /// by a report. Complete it toward the modem like an unavailable network.
+    pub fn bring_up_failed(&mut self, request: Request) -> Vec<Effect> {
+        self.diagnostics.broker_call_failures =
+            self.diagnostics.broker_call_failures.saturating_add(1);
+        if !self.request_is_current(request) {
+            return vec![];
+        }
+        self.fail_matching(|s| Self::group_key(&s.activation) == request.key)
+    }
+    /// The group is already gone. The broker adopts its held request again on
+    /// the next bring-up for the same slot and type.
+    pub fn release_failed(&mut self) {
+        self.diagnostics.broker_call_failures =
+            self.diagnostics.broker_call_failures.saturating_add(1);
     }
     pub fn set_emergency_enabled(&mut self, enabled: bool) -> Vec<Effect> {
         self.emergency_enabled = enabled;
