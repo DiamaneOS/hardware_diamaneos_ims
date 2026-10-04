@@ -39,6 +39,9 @@ pub enum Finished<T> {
     Submitted(T),
     Obsolete(T),
     PeerLost(Peer, Vec<T>),
+    /// The peer's head stayed backpressured past its deadline. The peer may
+    /// still be alive; the caller decides what to keep.
+    Expired(Peer, Vec<T>),
 }
 
 pub struct Outbox<T> {
@@ -105,7 +108,7 @@ impl<T> Outbox<T> {
         // reaching its old deadline. Only still-eligible work can expire a peer.
         let obsolete = !eligible(peer, &head.token);
         if !obsolete && now_ms >= head.deadline_ms {
-            return Some(Finished::PeerLost(peer, self.purge(peer)));
+            return Some(Finished::Expired(peer, self.purge(peer)));
         }
         let outcome = if obsolete {
             Attempt::Obsolete

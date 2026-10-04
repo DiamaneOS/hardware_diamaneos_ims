@@ -210,3 +210,44 @@ fn known_broker_loss_invalidates_retained_up_before_submission() {
         e.finish_output(p, Disposition::Obsolete);
     }
 }
+
+#[test]
+fn a_stalled_peer_gets_terminal_results_before_its_request_is_released() {
+    let mut e = Engine::new(A.node, 2).unwrap();
+    e.broker_connected();
+    let effects = e.receive(A, &activate(1));
+    let (packets, request) = retain(&mut e, effects);
+    for p in packets {
+        e.finish_output(p, Disposition::Submitted);
+    }
+    let request = request.unwrap();
+    let effects = e.report(request, Some(network(1, 10)));
+    let (pending, _) = retain(&mut e, effects);
+    let effects = e.peer_stalled(A);
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::Release(released) if *released == request)));
+    // The client is still tracked, so its terminal result keeps a lifetime.
+    assert!(e.peer_is_tracked(A));
+    let (terminal, _) = retain(&mut e, effects);
+    assert_eq!(terminal.len(), 1);
+    let bytes = e.prepare_output(&terminal[0]).unwrap();
+    let frame = Frame::parse(&bytes).unwrap();
+    assert_eq!((frame.kind, frame.id), (Kind::Indication, ACTIVATE));
+    assert!(frame.tlv(0x11).is_none());
+    // The stalled UP no longer describes a session.
+    assert!(e.prepare_output(&pending[0]).is_none());
+    for p in pending {
+        e.finish_output(p, Disposition::Obsolete);
+    }
+    for p in terminal {
+        e.finish_output(p, Disposition::Submitted);
+    }
+    assert!(e.peer_stalled(A).is_empty());
+    let diagnostics = e.diagnostics();
+    assert_eq!(
+        (diagnostics.client_stalls, diagnostics.client_losses),
+        (1, 0)
+    );
+    assert_eq!(diagnostics.active_sessions, 0);
+}

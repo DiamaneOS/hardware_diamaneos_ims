@@ -76,7 +76,7 @@ fn expiry_and_overflow_return_all_affected_ownership_only() {
         |_, _| true,
         |_, _| panic!("expired head must not submit"),
     ) {
-        Some(Finished::PeerLost(peer, values)) => {
+        Some(Finished::Expired(peer, values)) => {
             assert_eq!(peer, A);
             assert_eq!(values.len(), capacity);
         }
@@ -84,6 +84,28 @@ fn expiry_and_overflow_return_all_affected_ownership_only() {
     }
     assert_eq!(queue.peer_count(), 1);
     assert_eq!(queue.drain(), vec![200]);
+}
+
+#[test]
+fn only_a_failed_send_reports_peer_loss_and_expired_work_can_be_queued_again() {
+    let mut queue = Outbox::default();
+    assert!(queue.enqueue(A, 1, 20, 0).is_ok());
+    assert!(queue.enqueue(A, 2, 20, 0).is_ok());
+    let values = match queue.attempt(2000, |_, _| true, |_, _| panic!("expired")) {
+        Some(Finished::Expired(A, values)) => values,
+        _ => panic!(),
+    };
+    for value in values {
+        assert!(queue.enqueue(A, value, 20, 2000).is_ok());
+    }
+    assert!(queue
+        .attempt(3999, |_, _| true, |_, _| Attempt::Backpressured)
+        .is_none());
+    assert!(matches!(
+        queue.attempt(3999, |_, _| true, |_, _| Attempt::PeerLost),
+        Some(Finished::PeerLost(A, values)) if values == vec![1, 2]
+    ));
+    assert_eq!(queue.peer_count(), 0);
 }
 
 #[test]
