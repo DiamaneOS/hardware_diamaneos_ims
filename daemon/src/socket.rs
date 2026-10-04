@@ -195,31 +195,10 @@ impl Qrtr {
             node: 0,
             port: 0,
         };
-        let mut len = mem::size_of::<Address>() as libc::socklen_t;
-        let n = unsafe {
-            libc::recvfrom(
-                self.fd.as_raw_fd(),
-                bytes.as_mut_ptr().cast(),
-                bytes.len(),
-                libc::MSG_DONTWAIT | libc::MSG_TRUNC,
-                (&mut a as *mut Address).cast(),
-                &mut len,
-            )
+        let Some((n, len)) = receive_packet(self.fd.as_raw_fd(), &mut bytes, &mut a)? else {
+            return Ok(None);
         };
-        if n < 0 {
-            let e = io::Error::last_os_error();
-            if matches!(
-                e.kind(),
-                io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
-            ) {
-                return Ok(None);
-            }
-            return Err(e);
-        }
-        if n as usize > bytes.len()
-            || len as usize != mem::size_of::<Address>()
-            || a.family != AF_QIPCRTR as u16
-        {
+        if len as usize != mem::size_of::<Address>() || a.family != AF_QIPCRTR as u16 {
             return Ok(None);
         }
         Ok(Some((
@@ -283,5 +262,76 @@ impl Drop for Qrtr {
             let _ = self.control(Control::server(DEL_SERVER, self.local));
         }
         let _ = self.control(Control::lookup(DEL_LOOKUP));
+    }
+}
+
+/// Read one bounded datagram, rejecting truncated payload or ancillary data.
+/// QRTR returns copied length, so recvfrom's input MSG_TRUNC is insufficient.
+fn receive_packet(
+    fd: std::os::fd::RawFd,
+    bytes: &mut [u8],
+    address: &mut Address,
+) -> io::Result<Option<(usize, libc::socklen_t)>> {
+    let mut iov = libc::iovec {
+        iov_base: bytes.as_mut_ptr().cast(),
+        iov_len: bytes.len(),
+    };
+    // SAFETY: msghdr is a C POD structure. Null ancillary pointers and zero
+    // lengths are valid; all named buffers stay live through this syscall.
+    let mut message: libc::msghdr = unsafe { mem::zeroed() };
+    message.msg_name = (address as *mut Address).cast();
+    message.msg_namelen = mem::size_of::<Address>() as libc::socklen_t;
+    message.msg_iov = &mut iov;
+    message.msg_iovlen = 1;
+    // SAFETY: the message references one writable slice and the exact QRTR
+    // address-sized buffer. No pointers escape the synchronous call.
+    let n = unsafe { libc::recvmsg(fd, &mut message, libc::MSG_DONTWAIT) };
+    if n < 0 {
+        let error = io::Error::last_os_error();
+        if matches!(
+            error.kind(),
+            io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+        ) {
+            return Ok(None);
+        }
+        return Err(error);
+    }
+    if message.msg_flags & (libc::MSG_TRUNC | libc::MSG_CTRUNC) != 0 || n as usize > bytes.len() {
+        return Ok(None);
+    }
+    Ok(Some((n as usize, message.msg_namelen)))
+}
+
+#[cfg(test)]
+mod receive_tests {
+    use super::*;
+    use std::os::unix::net::UnixDatagram;
+
+    #[test]
+    fn oversized_datagram_is_rejected_even_when_kernel_returns_copied_length() {
+        let (sender, receiver) = UnixDatagram::pair().unwrap();
+        let mut buffer = [0; 8];
+        let mut address = Address {
+            family: 0,
+            reserved: 0,
+            node: 0,
+            port: 0,
+        };
+        sender.send(&[1; 9]).unwrap();
+        assert!(
+            receive_packet(receiver.as_raw_fd(), &mut buffer, &mut address)
+                .unwrap()
+                .is_none()
+        );
+        // The rejected packet is consumed; an exact-sized next packet is intact.
+        sender.send(&[2; 8]).unwrap();
+        assert_eq!(
+            receive_packet(receiver.as_raw_fd(), &mut buffer, &mut address)
+                .unwrap()
+                .unwrap()
+                .0,
+            buffer.len()
+        );
+        assert_eq!(buffer, [2; 8]);
     }
 }
