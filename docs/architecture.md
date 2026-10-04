@@ -24,7 +24,9 @@ an arbitrary installed package. Both policy and device isolation need validation
 
 The broker uses a fresh callback object for each daemon connection. Stale death
 notifications and queued old callbacks cannot affect its successor. Network
-replacement waits for matching capabilities and link properties before reporting. A blocked network is not advertised as usable.
+replacement waits for matching capabilities and link properties before reporting. The broker reports only restricted cellular IMS/EIMS metadata. Its own UID firewall
+or VPN-blocked state does not gate the modem bearer; it holds no INTERNET permission,
+opens no IP sockets and grants no application access or VPN bypass.
 Both address consumers share Android's preferred-address flag rule: failed-DAD
 and deprecated addresses are rejected; tentative addresses require the optimistic
 flag. Link-local, multicast, loopback and unspecified addresses remain excluded.
@@ -68,3 +70,15 @@ or Linux UAPI facts. They belong in named definitions with provenance, not
 user-editable configuration. Device-selected modem node and slot count remain
 product configuration. Limits and timings should change only with their
 lifecycle, memory and device-qualification implications reviewed together.
+
+The FP6 kernel integration reserves QRTR port `0x7fff` for the single local IMS
+DCM instance (`0x302`). This is a downstream role allocation at the top of the
+normal ephemeral range, not a carrier or modem protocol constant. Binding and
+user send/receive operations require both the dedicated vendor UID and the
+`diamaneos_imsdcm` SELinux subject. Other auto-bound QRTR clients use the remaining
+range. Service records advertise their actual source node/port. The reserved
+port remains unavailable to other roles while unbound, so stale discovery cannot
+route DCM traffic into an unrelated replacement socket. Stale discovery and
+transaction continuity across restart still need native recovery qualification.
+Pair this daemon with `CONFIG_QRTR_IMSDCM_OWNERSHIP=y`; an unpaired stock kernel
+does not enforce the ownership boundary.

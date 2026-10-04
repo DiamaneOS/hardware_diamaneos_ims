@@ -13,9 +13,10 @@ remain subject to the verification limits in [verification](docs/verification.md
 - `daemon/`: QRTR/Binder adapter, dedicated UID, enforcing policy, bounded queues
   and arm64 syscall filter. Device configuration identifies the modem explicitly.
 - `broker/`: requests Android telephony IMS/EIMS networks, including carrier
-  IWLAN as exposed by telephony. It declares the revocable Network permission
-  for Android's network-policy accounting; SELinux forbids direct IP/modem
-  sockets. It has no location or SMS permission.
+  IWLAN as exposed by telephony. It reports restricted-bearer metadata without
+  Internet permission or app traffic; its own UID's VPN/firewall block does not
+  describe the modem bearer. SELinux forbids non-local network sockets.
+  It has no location or SMS permission.
 - `wlan/`: bounded DSD protocol and acknowledgement state machine.
 - `wlan-runtime/`: isolated QRTR client and authenticated Binder snapshot adapter.
 - `wlan-observer/`: passive observations of the connected Wi-Fi link, with no
