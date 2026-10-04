@@ -22,7 +22,7 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr},
     sync::{
         atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
-        mpsc::{sync_channel, SyncSender, TryRecvError},
+        mpsc::{sync_channel, SyncSender, TryRecvError, TrySendError},
         Arc, Mutex,
     },
     time::{Duration, Instant},
@@ -49,7 +49,7 @@ enum Event {
 struct Service {
     sender: SyncSender<Event>,
     epoch: Arc<AtomicU64>,
-    overflow: Arc<AtomicBool>,
+    queue_waits: Arc<AtomicU64>,
     broker_uid: AtomicU32,
     diagnostics: Arc<Mutex<Diagnostics>>,
 }
@@ -67,7 +67,10 @@ impl Interface for Service {
             .diagnostics
             .lock()
             .map_err(|_| binder::StatusCode::FAILED_TRANSACTION)?;
-        writeln!(writer, "{snapshot:?}").map_err(|_| binder::StatusCode::FAILED_TRANSACTION)
+        let waits = self.queue_waits.load(Ordering::Relaxed);
+        writeln!(writer, "{snapshot:?}")
+            .and_then(|()| writeln!(writer, "Runtime {{ binder_queue_waits: {waits} }}"))
+            .map_err(|_| binder::StatusCode::FAILED_TRANSACTION)
     }
 }
 fn denied() -> Status {
@@ -92,10 +95,22 @@ fn key(r: &PdnRequest) -> binder::Result<Request> {
         serial: r.serial,
     })
 }
+/// A full queue blocks the calling Binder thread until the main loop drains it.
+/// Oneway reports and death notices then wait in the kernel instead of being
+/// lost. The main loop never waits for these threads, so this cannot deadlock.
+fn deliver(sender: &SyncSender<Event>, waits: &AtomicU64, e: Event) -> bool {
+    match sender.try_send(e) {
+        Ok(()) => true,
+        Err(TrySendError::Full(e)) => {
+            waits.fetch_add(1, Ordering::Relaxed);
+            sender.send(e).is_ok()
+        }
+        Err(TrySendError::Disconnected(_)) => false,
+    }
+}
 impl Service {
     fn enqueue(&self, e: Event) -> binder::Result<()> {
-        if self.sender.try_send(e).is_err() {
-            self.overflow.store(true, Ordering::Release);
+        if !deliver(&self.sender, &self.queue_waits, e) {
             return Err(Status::new_exception(ExceptionCode::ILLEGAL_STATE, None));
         }
         Ok(())
@@ -116,11 +131,9 @@ impl IImsDcm for Service {
         // gets an epoch, so a delayed death callback cannot disconnect its successor.
         let epoch = self.epoch.fetch_add(1, Ordering::AcqRel) + 1;
         let sender = self.sender.clone();
-        let overflow = self.overflow.clone();
+        let waits = self.queue_waits.clone();
         let mut death = DeathRecipient::new(move || {
-            if sender.try_send(Event::Lost(epoch)).is_err() {
-                overflow.store(true, Ordering::Release);
-            }
+            deliver(&sender, &waits, Event::Lost(epoch));
         });
         broker.as_binder().link_to_death(&mut death)?;
         self.enqueue(Event::Register(epoch, broker.clone(), death))
@@ -212,13 +225,12 @@ fn run() -> io::Result<()> {
         return Err(io::Error::other("modem node is local"));
     }
     let (tx, rx) = sync_channel(64);
-    let overflow = Arc::new(AtomicBool::new(false));
     let diagnostics = Arc::new(Mutex::new(engine.diagnostics()));
     let service = BnImsDcm::new_binder(
         Service {
             sender: tx,
             epoch: Arc::new(AtomicU64::new(0)),
-            overflow: overflow.clone(),
+            queue_waits: Arc::new(AtomicU64::new(0)),
             broker_uid: AtomicU32::new(0),
             diagnostics: diagnostics.clone(),
         },
@@ -269,9 +281,6 @@ fn run() -> io::Result<()> {
                             || error.kind() == io::ErrorKind::TimedOut => {}
                     Err(error) => return Err(error),
                 }
-            }
-            if overflow.load(Ordering::Acquire) {
-                return Err(io::Error::other("binder queue overflow"));
             }
             if debug_controls && prop("vendor.diamaneos.ims.dcm_kill").as_deref() == Some("1") {
                 break;
