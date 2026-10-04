@@ -3,11 +3,14 @@
 //! Small FFI boundary. Owns one datagram fd; never opens Internet sockets.
 use diamaneos_ims_dcm::{engine::Peer, protocol::MAX_DATAGRAM, qrtr::*};
 use std::{
+    collections::VecDeque,
     io, mem,
     os::fd::{AsRawFd, FromRawFd, OwnedFd},
     time::{Duration, Instant},
 };
 const AF_QIPCRTR: libc::c_int = 42;
+// One main-loop receive quantum of datagrams read during publication.
+const MAX_DEFERRED_PACKETS: usize = 32;
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct Address {
@@ -24,6 +27,8 @@ pub struct Qrtr {
     fd: OwnedFd,
     local: Peer,
     published: bool,
+    // Read while publishing; receive() returns these before reading again.
+    deferred: VecDeque<(Peer, Vec<u8>)>,
 }
 impl Qrtr {
     pub fn bind() -> io::Result<Self> {
@@ -102,6 +107,7 @@ impl Qrtr {
                 port: a.port,
             },
             published: false,
+            deferred: VecDeque::new(),
         })
     }
     pub fn local(&self) -> Peer {
@@ -138,7 +144,13 @@ impl Qrtr {
         }
         Ok(())
     }
-    pub fn receive(&self, timeout: Duration) -> io::Result<Option<(Peer, Vec<u8>)>> {
+    pub fn receive(&mut self, timeout: Duration) -> io::Result<Option<(Peer, Vec<u8>)>> {
+        if let Some(packet) = self.deferred.pop_front() {
+            return Ok(Some(packet));
+        }
+        self.read(timeout)
+    }
+    fn read(&self, timeout: Duration) -> io::Result<Option<(Peer, Vec<u8>)>> {
         let mut p = libc::pollfd {
             fd: self.fd.as_raw_fd(),
             events: libc::POLLIN,
@@ -222,24 +234,21 @@ impl Qrtr {
         self.control(Control::lookup(NEW_LOOKUP))?;
         let deadline = Instant::now() + Duration::from_secs(2);
         while Instant::now() < deadline {
-            if let Some((peer, data)) = self.receive(Duration::from_millis(100))? {
-                if peer
-                    != (Peer {
-                        node: self.local.node,
-                        port: CTRL_PORT,
-                    })
-                {
-                    continue;
+            let Some((peer, data)) = self.read(Duration::from_millis(100))? else {
+                continue;
+            };
+            match lookup_input(self.local, peer, &data) {
+                Lookup::Conflict => {
+                    self.control(Control::lookup(DEL_LOOKUP))?;
+                    return Ok(Publication::Conflict);
                 }
-                if let Some(c) = Control::decode(&data) {
-                    if c.conflicts_with(self.local) {
-                        self.control(Control::lookup(DEL_LOOKUP))?;
-                        return Ok(Publication::Conflict);
-                    }
-                    if c.lookup_complete() {
-                        break;
-                    }
+                Lookup::Complete => break,
+                // The modem keeps sending to the fixed port while this repeats
+                // publication; keep its requests instead of dropping them.
+                Lookup::Keep if self.deferred.len() < MAX_DEFERRED_PACKETS => {
+                    self.deferred.push_back((peer, data))
                 }
+                Lookup::Keep | Lookup::Ignore => (),
             }
         }
         // The paired kernel reserves this port and service for the single local
