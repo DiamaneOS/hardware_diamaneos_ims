@@ -6,4 +6,6 @@
 # the daemon calls back (imsdcm.te). Same pattern as the device tree's
 # telephony/qcril_audio.te for the QCRIL audio messenger.
 allow diamaneos_ims_broker_app diamaneos_imsdcm_service:service_manager find;
-binder_call(diamaneos_ims_broker_app, diamaneos_imsdcm)
+# The frozen callback carries Binder references and values, never file descriptors.
+allow diamaneos_ims_broker_app diamaneos_imsdcm:binder { call transfer };
+allow diamaneos_imsdcm diamaneos_ims_broker_app:binder transfer;
