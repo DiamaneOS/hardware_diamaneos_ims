@@ -274,6 +274,7 @@ fn run() -> io::Result<()> {
     let mut published = false;
     let origin = Instant::now();
     const PUBLICATION_RETRY_DELAY_MS: u64 = 30_000;
+    const MAX_RECEIVED_PACKETS_PER_CYCLE: usize = 32;
     let mut next_publication = 0;
     let mut dispatch = Dispatch::default();
     // SAFETY: handler only stores an atomic flag; no allocation or I/O in signals.
@@ -349,28 +350,35 @@ fn run() -> io::Result<()> {
                 };
                 dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
             }
-            let incoming = if dispatch.socket_reset {
-                None
-            } else {
-                match socket.receive(Duration::from_millis(25)) {
-                    Ok(packet) => packet,
+            // Drain a bounded quantum, as for Binder events, so a local flood of
+            // the reserved port cannot crowd modem requests out of the socket.
+            for index in 0..MAX_RECEIVED_PACKETS_PER_CYCLE {
+                if dispatch.socket_reset {
+                    break;
+                }
+                let wait = if index == 0 {
+                    Duration::from_millis(25)
+                } else {
+                    Duration::ZERO
+                };
+                let (peer, bytes) = match socket.receive(wait) {
+                    Ok(Some(packet)) => packet,
+                    Ok(None) => break,
                     Err(error) => match classify(&error) {
                         Fault::Retry => {
                             if exhausted(&error) {
                                 engine.transport_exhausted();
                             }
-                            None
+                            break;
                         }
                         // A socket-wide receive failure has no destination peer.
                         Fault::PeerGone | Fault::SocketReset => {
                             dispatch.socket_reset = true;
-                            None
+                            break;
                         }
                         Fault::Unexpected => return Err(error),
                     },
-                }
-            };
-            if let Some((peer, bytes)) = incoming {
+                };
                 let out = if peer.port == CTRL_PORT && peer.node == socket.local().node {
                     match Control::decode(&bytes) {
                         Some(c) if c.conflicts_with(socket.local()) => {
