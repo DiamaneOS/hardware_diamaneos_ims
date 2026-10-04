@@ -306,7 +306,8 @@ fn run() -> io::Result<()> {
             }
             let enabled = !debug_controls
                 || prop("vendor.diamaneos.ims.emergency_pdn_kill").as_deref() != Some("1");
-            let out = engine.set_emergency_enabled(enabled);
+            let mut out = engine.set_emergency_enabled(enabled);
+            out.extend(engine.expire(now));
             dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
             // Bound work per iteration so a broker flood cannot starve QRTR or signals.
             for _ in 0..32 {
@@ -324,8 +325,7 @@ fn run() -> io::Result<()> {
                         }
                         latest_registration = epoch;
                         if broker.is_some() {
-                            let out = engine.broker_lost();
-                            dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
+                            engine.broker_lost(now);
                         }
                         broker = Some((epoch, b, d));
                         engine.broker_connected()
@@ -334,10 +334,9 @@ fn run() -> io::Result<()> {
                         latest_registration = latest_registration.max(epoch);
                         if broker.as_ref().is_some_and(|b| b.0 == epoch) {
                             broker = None;
-                            engine.broker_lost()
-                        } else {
-                            vec![]
+                            engine.broker_lost(now);
                         }
+                        vec![]
                     }
                     Event::Report(epoch, r, n) => {
                         if broker.as_ref().is_some_and(|b| b.0 == epoch) {
@@ -408,8 +407,7 @@ fn run() -> io::Result<()> {
             if let Some(epoch) = dispatch.broker_lost.take() {
                 if broker.as_ref().is_some_and(|current| current.0 == epoch) {
                     broker = None;
-                    let out = engine.broker_lost();
-                    dispatch.apply(&socket, &mut engine, None, out, now)?;
+                    engine.broker_lost(now);
                 }
             }
             if !dispatch.socket_reset {
@@ -418,8 +416,7 @@ fn run() -> io::Result<()> {
             if let Some(epoch) = dispatch.broker_lost.take() {
                 if broker.as_ref().is_some_and(|current| current.0 == epoch) {
                     broker = None;
-                    let out = engine.broker_lost();
-                    dispatch.apply(&socket, &mut engine, None, out, now)?;
+                    engine.broker_lost(now);
                 }
             }
             if std::mem::take(&mut dispatch.socket_reset) {

@@ -14,7 +14,10 @@ messages. Session IDs are bounded to 20–98, with capacity reserved for emergen
 requests. One group per slot/type holds the Android request; IPv4/IPv6 sessions
 reference that group. Reports carry generation serials. Address disappearance,
 network loss and unavailable requests never produce a success address. No custom
-emergency setup timeout competes with the modem's retry policy.
+emergency setup timeout competes with the modem's retry policy. Broker loss revokes
+its networks at once but keeps groups and sessions for a downstream 15-second
+grace period, so a broker that registers again re-files them within seconds.
+Without one, the sessions then end with terminal results.
 
 Vendor Rust Binder does not expose caller SELinux IDs. Therefore the daemon
 refuses permissive SELinux, policy restricts registration/calls to the broker
