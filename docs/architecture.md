@@ -30,13 +30,7 @@ emergency setup timeout competes with the modem's retry policy.
   policy/code contract cannot by itself authenticate an arbitrary installed
   package, so policy and device isolation both need validation.
 
-The broker uses a fresh callback object for each daemon connection. Stale death
-notifications and queued old callbacks cannot affect its successor. Network
-replacement waits for matching capabilities and link properties before reporting. A blocked network is not advertised as usable.
-Both address consumers share Android's preferred-address flag rule: failed-DAD
-and deprecated addresses are rejected; tentative addresses require the optimistic
-flag. Link-local, multicast, loopback and unspecified addresses remain excluded.
-This changes eligibility only, not each consumer's existing address ordering.
+## Broker
 
 - A fresh callback object per daemon connection, so stale death notifications
   and queued old callbacks cannot affect its successor.
@@ -92,3 +86,15 @@ authority.
   device-qualification effects reviewed together.
 
 ## QRTR port reservation
+
+- The paired kernel reserves QRTR port `0x7fff` for the single local
+  IMS DCM instance (`0x302`): a downstream role allocation at the top of the
+  normal ephemeral range, not a carrier or modem constant.
+- Binding and user send/receive need both the dedicated vendor UID and the
+  `diamaneos_imsdcm` SELinux subject. Other auto-bound QRTR clients use the rest
+  of the range, and service records advertise their actual source node/port.
+- While unbound, the port stays unavailable to other roles, so stale discovery
+  cannot route DCM traffic into an unrelated replacement socket. Host tests do
+  not cover stale discovery and transaction continuity across a restart.
+- Pair this daemon with `CONFIG_QRTR_IMSDCM_OWNERSHIP=y`. An unpaired stock
+  kernel does not enforce the ownership boundary.

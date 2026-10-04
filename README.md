@@ -2,20 +2,22 @@
 
 Android source location: `hardware/diamaneos/ims`.
 
-This repository provides the modem's IMS and emergency data-connection path and
-optional Wi-Fi link reporting for native Qualcomm IWLAN. It
-does not replace the existing Android IMS service or the modem's IMS signalling,
-voice and carrier emergency-location implementation. Native and carrier behavior
-remain subject to the verification limits in [verification](docs/verification.md).
+The modem's IMS and emergency data-connection path, plus optional Wi-Fi link
+reporting for native Qualcomm IWLAN. Android's IMS service and the modem's IMS
+signalling, voice and carrier emergency location are not replaced. Native and
+carrier behavior: see [verification](docs/verification.md).
 
-- `dcm/`: memory-safe QMI DCM codec and bounded connection state machine, with
-  separate SIMs, shared address-family requests and reserved emergency capacity.
-- `daemon/`: QRTR/Binder adapter, dedicated UID, enforcing policy, bounded queues
-  and arm64 syscall filter. Device configuration identifies the modem explicitly.
-- `broker/`: requests Android telephony IMS/EIMS networks, including carrier
-  IWLAN as exposed by telephony. It declares the revocable Network permission
-  for Android's network-policy accounting; SELinux forbids direct IP/modem
-  sockets. It has no location or SMS permission.
+## Components
+
+- `dcm/`: memory-safe QMI DCM codec and bounded connection state machine
+  (separate SIMs, shared address-family requests, reserved emergency capacity).
+- `daemon/`: QRTR/Binder adapter with a dedicated UID, enforcing policy, bounded
+  queues, an arm64 syscall filter and an explicitly configured modem.
+- `broker/`: requests telephony's IMS/EIMS networks, including carrier IWLAN.
+  - Reports restricted-bearer metadata only.
+  - No Internet, location or SMS permission, no app traffic, no non-local
+    sockets (SELinux).
+  - Its own UID's VPN/firewall block does not describe the modem bearer.
 - `wlan/`: bounded DSD protocol and acknowledgement state machine.
 - `wlan-runtime/`: isolated QRTR client and authenticated Binder snapshot adapter.
 - `wlan-observer/`: passive observation of the connected Wi-Fi link, with no

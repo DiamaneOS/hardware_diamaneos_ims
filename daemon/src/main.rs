@@ -207,7 +207,7 @@ fn run() -> io::Result<()> {
     let node = number("ro.vendor.diamaneos.ims.modem_node")?;
     let slots = number("ro.vendor.diamaneos.ims.slots")?;
     let mut engine = Engine::new(node, slots).map_err(io::Error::other)?;
-    let mut socket = Qrtr::bind()?;
+    let mut socket = Qrtr::bind_imsdcm()?;
     if socket.local().node == node {
         return Err(io::Error::other("modem node is local"));
     }
@@ -333,7 +333,7 @@ fn run() -> io::Result<()> {
                         dispatch.purge_all(&mut engine, broker.as_ref())?;
                         let out = engine.node_gone(node);
                         dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
-                        socket = Qrtr::bind()?;
+                        socket = socket.rebind_imsdcm()?;
                         published = false;
                         next_publication = now;
                         None
@@ -384,7 +384,7 @@ fn run() -> io::Result<()> {
                 dispatch.purge_all(&mut engine, broker.as_ref())?;
                 let out = engine.node_gone(node);
                 dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
-                socket = Qrtr::bind()?;
+                socket = socket.rebind_imsdcm()?;
                 published = false;
                 next_publication = now;
             }
