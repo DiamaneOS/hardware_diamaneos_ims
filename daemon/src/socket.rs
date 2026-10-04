@@ -27,6 +27,23 @@ pub struct Qrtr {
 }
 impl Qrtr {
     pub fn bind() -> io::Result<Self> {
+        Self::bind_port(0)
+    }
+
+    pub fn bind_imsdcm() -> io::Result<Self> {
+        // Downstream role allocation paired with CONFIG_QRTR_IMSDCM_OWNERSHIP.
+        // Discovery still advertises the port; no modem firmware ABI is changed.
+        const IMSDCM_PORT: u32 = 0x7fff;
+        Self::bind_port(IMSDCM_PORT)
+    }
+
+    pub fn rebind_imsdcm(self) -> io::Result<Self> {
+        // A reserved port cannot be rebound while its previous FD still owns it.
+        drop(self);
+        Self::bind_imsdcm()
+    }
+
+    fn bind_port(port: u32) -> io::Result<Self> {
         // SAFETY: socket returns an owned fd on success. Address is the Linux UAPI
         // sockaddr_qrtr (12 bytes); both sizes are checked by the kernel.
         let raw = unsafe {
@@ -58,7 +75,7 @@ impl Qrtr {
         if len as usize != mem::size_of::<Address>() || a.family != AF_QIPCRTR as u16 {
             return Err(io::Error::other("invalid QRTR local address"));
         }
-        a.port = 0;
+        a.port = port;
         let rc = unsafe {
             libc::bind(
                 raw,

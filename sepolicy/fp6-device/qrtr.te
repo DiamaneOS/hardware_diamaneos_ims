@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The DiamaneOS Project
 #
-# Example for the device tree: review against its sepolicy/telephony/qrtr.te (a
+# Reference inventory only: review against the device tree's sepolicy/telephony/qrtr.te (a
 # BOARD_VENDOR_SEPOLICY_DIRS entry). It names that tree's domains, so it
 # belongs with them; nothing adds this directory to the build.
 #
@@ -14,6 +14,7 @@
 neverallow {
   domain
   -diamaneos_imsdcm
+  -diamaneos_wlan_reporter
   -fp6_iwlan_app
   -hal_audio_default
   -hal_camera_default
