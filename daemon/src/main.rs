@@ -37,6 +37,9 @@ use vendor_diamaneos_hardware_imsdcm::aidl::vendor::diamaneos::hardware::imsdcm:
 };
 
 const SERVICE: &str = "vendor.diamaneos.hardware.imsdcm.IImsDcm/default";
+// Nonpersistent kill switches, honored only on debuggable builds.
+const DCM_KILL: &str = "vendor.diamaneos.ims.dcm_kill";
+const EMERGENCY_PDN_KILL: &str = "vendor.diamaneos.ims.emergency_pdn_kill";
 static STOP: AtomicBool = AtomicBool::new(false);
 extern "C" fn stop(_: libc::c_int) {
     STOP.store(true, Ordering::Relaxed);
@@ -52,6 +55,7 @@ struct Service {
     queue_waits: Arc<AtomicU64>,
     broker_uid: AtomicU32,
     diagnostics: Arc<Mutex<Diagnostics>>,
+    debug_controls: bool,
 }
 impl Interface for Service {
     fn dump(&self, writer: &mut dyn io::Write, args: &[&CStr]) -> Result<(), binder::StatusCode> {
@@ -68,8 +72,20 @@ impl Interface for Service {
             .lock()
             .map_err(|_| binder::StatusCode::FAILED_TRANSACTION)?;
         let waits = self.queue_waits.load(Ordering::Relaxed);
+        // Current switch properties; None where the build does not honor them.
+        let switch = |name| {
+            self.debug_controls
+                .then(|| prop(name).as_deref() == Some("1"))
+        };
+        let (dcm_kill, emergency_pdn_kill) = (switch(DCM_KILL), switch(EMERGENCY_PDN_KILL));
         writeln!(writer, "{snapshot:?}")
-            .and_then(|()| writeln!(writer, "Runtime {{ binder_queue_waits: {waits} }}"))
+            .and_then(|()| {
+                writeln!(
+                    writer,
+                    "Runtime {{ binder_queue_waits: {waits}, dcm_kill: {dcm_kill:?}, \
+                     emergency_pdn_kill: {emergency_pdn_kill:?} }}"
+                )
+            })
             .map_err(|_| binder::StatusCode::FAILED_TRANSACTION)
     }
 }
@@ -261,6 +277,7 @@ fn run() -> io::Result<()> {
             queue_waits: Arc::new(AtomicU64::new(0)),
             broker_uid: AtomicU32::new(0),
             diagnostics: diagnostics.clone(),
+            debug_controls,
         },
         BinderFeatures::default(),
     );
@@ -301,11 +318,10 @@ fn run() -> io::Result<()> {
                     },
                 }
             }
-            if debug_controls && prop("vendor.diamaneos.ims.dcm_kill").as_deref() == Some("1") {
+            if debug_controls && prop(DCM_KILL).as_deref() == Some("1") {
                 break;
             }
-            let enabled = !debug_controls
-                || prop("vendor.diamaneos.ims.emergency_pdn_kill").as_deref() != Some("1");
+            let enabled = !debug_controls || prop(EMERGENCY_PDN_KILL).as_deref() != Some("1");
             let mut out = engine.set_emergency_enabled(enabled);
             out.extend(engine.expire(now));
             dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
