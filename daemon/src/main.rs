@@ -203,6 +203,34 @@ fn request(r: Request) -> PdnRequest {
         serial: r.serial,
     }
 }
+/// The reserved port cannot be bound while the old descriptor owns it, so there
+/// is no socket to serve until a replacement binds. Retry with bounded backoff
+/// instead of stopping the daemon; None only when asked to stop meanwhile.
+fn rebind(
+    socket: Qrtr,
+    engine: &mut Engine,
+    diagnostics: &Mutex<Diagnostics>,
+) -> io::Result<Option<Qrtr>> {
+    const FIRST_REBIND_DELAY_MS: u64 = 100;
+    const MAX_REBIND_DELAY_MS: u64 = 5_000;
+    let mut delay = FIRST_REBIND_DELAY_MS;
+    let mut attempt = socket.rebind_imsdcm();
+    loop {
+        match attempt {
+            Ok(socket) => return Ok(Some(socket)),
+            Err(_) => engine.socket_rebind_failed(),
+        }
+        *diagnostics
+            .lock()
+            .map_err(|_| io::Error::other("diagnostic state"))? = engine.diagnostics();
+        if STOP.load(Ordering::Relaxed) {
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(delay));
+        delay = delay.saturating_mul(2).min(MAX_REBIND_DELAY_MS);
+        attempt = Qrtr::bind_imsdcm();
+    }
+}
 fn run() -> io::Result<()> {
     if unsafe { libc::getuid() } != 2990 {
         return Err(io::Error::other("wrong daemon uid"));
@@ -241,23 +269,12 @@ fn run() -> io::Result<()> {
     ProcessState::start_thread_pool();
     binder::add_service(SERVICE, service.as_binder())
         .map_err(|_| io::Error::other("binder registration failed"))?;
-    // Initial collision is degradation, not a crash or a publication race.
-    let mut published = match socket.publish() {
-        Ok(Publication::Ready) => true,
-        Ok(Publication::Conflict) => {
-            engine.publisher_conflict();
-            false
-        }
-        Err(error)
-            if classify(&error) == Fault::Retry || error.kind() == io::ErrorKind::TimedOut =>
-        {
-            false
-        }
-        Err(error) => return Err(error),
-    };
+    // The first loop pass publishes. A collision is degradation, not a crash
+    // or a publication race.
+    let mut published = false;
     let origin = Instant::now();
     const PUBLICATION_RETRY_DELAY_MS: u64 = 30_000;
-    let mut next_publication = PUBLICATION_RETRY_DELAY_MS;
+    let mut next_publication = 0;
     let mut dispatch = Dispatch::default();
     // SAFETY: handler only stores an atomic flag; no allocation or I/O in signals.
     unsafe {
@@ -276,10 +293,12 @@ fn run() -> io::Result<()> {
                     Ok(Publication::Ready) => published = true,
                     Ok(Publication::Conflict) => engine.publisher_conflict(),
                     Err(error) if exhausted(&error) => engine.transport_exhausted(),
-                    Err(error)
-                        if classify(&error) == Fault::Retry
-                            || error.kind() == io::ErrorKind::TimedOut => {}
-                    Err(error) => return Err(error),
+                    Err(error) => match classify(&error) {
+                        Fault::Retry => (),
+                        Fault::PeerGone | Fault::SocketReset => dispatch.socket_reset = true,
+                        Fault::Unexpected if error.kind() == io::ErrorKind::TimedOut => (),
+                        Fault::Unexpected => return Err(error),
+                    },
                 }
             }
             if debug_controls && prop("vendor.diamaneos.ims.dcm_kill").as_deref() == Some("1") {
@@ -330,28 +349,26 @@ fn run() -> io::Result<()> {
                 };
                 dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
             }
-            let incoming = match socket.receive(Duration::from_millis(25)) {
-                Ok(packet) => packet,
-                Err(error) => match classify(&error) {
-                    Fault::Retry => {
-                        if exhausted(&error) {
-                            engine.transport_exhausted();
+            let incoming = if dispatch.socket_reset {
+                None
+            } else {
+                match socket.receive(Duration::from_millis(25)) {
+                    Ok(packet) => packet,
+                    Err(error) => match classify(&error) {
+                        Fault::Retry => {
+                            if exhausted(&error) {
+                                engine.transport_exhausted();
+                            }
+                            None
                         }
-                        None
-                    }
-                    Fault::PeerGone | Fault::SocketReset => {
                         // A socket-wide receive failure has no destination peer.
-                        // Withdraw this modem's state before replacing the socket.
-                        dispatch.purge_all(&mut engine, broker.as_ref());
-                        let out = engine.node_gone(node);
-                        dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
-                        socket = socket.rebind_imsdcm()?;
-                        published = false;
-                        next_publication = now;
-                        None
-                    }
-                    Fault::Unexpected => return Err(error),
-                },
+                        Fault::PeerGone | Fault::SocketReset => {
+                            dispatch.socket_reset = true;
+                            None
+                        }
+                        Fault::Unexpected => return Err(error),
+                    },
+                }
             };
             if let Some((peer, bytes)) = incoming {
                 let out = if peer.port == CTRL_PORT && peer.node == socket.local().node {
@@ -384,7 +401,9 @@ fn run() -> io::Result<()> {
                     dispatch.apply(&socket, &mut engine, None, out, now)?;
                 }
             }
-            dispatch.flush(&socket, &mut engine, broker.as_ref(), now)?;
+            if !dispatch.socket_reset {
+                dispatch.flush(&socket, &mut engine, broker.as_ref(), now)?;
+            }
             if let Some(epoch) = dispatch.broker_lost.take() {
                 if broker.as_ref().is_some_and(|current| current.0 == epoch) {
                     broker = None;
@@ -393,10 +412,15 @@ fn run() -> io::Result<()> {
                 }
             }
             if std::mem::take(&mut dispatch.socket_reset) {
+                // Withdraw this modem's state before replacing the socket.
                 dispatch.purge_all(&mut engine, broker.as_ref());
                 let out = engine.node_gone(node);
                 dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
-                socket = socket.rebind_imsdcm()?;
+                engine.publication_active(false);
+                socket = match rebind(socket, &mut engine, &diagnostics)? {
+                    Some(socket) => socket,
+                    None => break,
+                };
                 published = false;
                 next_publication = now;
             }

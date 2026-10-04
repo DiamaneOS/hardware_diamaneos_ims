@@ -124,6 +124,8 @@ pub struct Diagnostics {
     pub transport_exhaustion: u64,
     // Oneway calls a live broker did not receive (not broker deaths).
     pub broker_call_failures: u64,
+    // Failed attempts to replace the reserved-port socket; each is retried.
+    pub socket_rebind_failures: u64,
 }
 /// Device configuration fixes the modem node and number of slots; no first-packet trust.
 pub struct Engine {
@@ -164,6 +166,10 @@ impl Engine {
     }
     pub fn publication_active(&mut self, active: bool) {
         self.diagnostics.publication_active = active;
+    }
+    pub fn socket_rebind_failed(&mut self) {
+        self.diagnostics.socket_rebind_failures =
+            self.diagnostics.socket_rebind_failures.saturating_add(1);
     }
     pub fn transport_exhausted(&mut self) {
         self.diagnostics.transport_exhaustion =
