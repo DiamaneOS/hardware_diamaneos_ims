@@ -12,10 +12,6 @@ public final class NetworkStateTest {
         check(s.capabilities(1, "IMS:sub1"));
         check(s.settling());
         check(s.links(1, "v4"));
-        check(s.settling());
-        check(!s.usable());
-        check(s.blocked(1, false));
-        check(s.usable());
         check(!s.settling());
         s.available(2);
         check(s.settling());
@@ -27,12 +23,6 @@ public final class NetworkStateTest {
         check(s.links(2, "v6"));
         check(s.settling());
         check(s.capabilities(2, "IMS:sub1"));
-        check(s.settling());
-        check(!s.blocked(1, false));
-        check(s.blocked(2, true));
-        check(!s.usable());
-        check(s.blocked(2, false));
-        check(s.usable());
         check(!s.settling());
         check(s.lost(2));
         check(s.network() == null);

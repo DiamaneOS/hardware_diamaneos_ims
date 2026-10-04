@@ -11,14 +11,12 @@ final class NetworkState<N, C, L> {
     private C capabilities;
     private L links;
     private boolean closed;
-    private Boolean blocked;
 
     void available(N n) {
         if (!closed) {
             network = n;
             capabilities = null;
             links = null;
-            blocked = null;
         }
     }
 
@@ -34,16 +32,6 @@ final class NetworkState<N, C, L> {
         return true;
     }
 
-    boolean blocked(N n, boolean value) {
-        if (!matches(n)) return false;
-        blocked = value;
-        return true;
-    }
-
-    boolean usable() {
-        return Boolean.FALSE.equals(blocked);
-    }
-
     boolean lost(N n) {
         if (!matches(n)) return false;
         network = null;
@@ -57,7 +45,7 @@ final class NetworkState<N, C, L> {
     }
 
     boolean settling() {
-        return network != null && (capabilities == null || links == null || blocked == null);
+        return network != null && (capabilities == null || links == null);
     }
 
     boolean closed() {
