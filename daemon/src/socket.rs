@@ -221,7 +221,6 @@ impl Qrtr {
     pub fn publish(&mut self) -> io::Result<Publication> {
         self.control(Control::lookup(NEW_LOOKUP))?;
         let deadline = Instant::now() + Duration::from_secs(2);
-        let mut complete = false;
         while Instant::now() < deadline {
             if let Some((peer, data)) = self.receive(Duration::from_millis(100))? {
                 if peer
@@ -238,19 +237,14 @@ impl Qrtr {
                         return Ok(Publication::Conflict);
                     }
                     if c.lookup_complete() {
-                        complete = true;
                         break;
                     }
                 }
             }
         }
-        if !complete {
-            self.control(Control::lookup(DEL_LOOKUP))?;
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "QRTR lookup incomplete",
-            ));
-        }
+        // The paired kernel reserves this port and service for the single local
+        // DCM role, so an unanswered lookup is no sign of a competing local
+        // publisher. Publish anyway; the lookup stays active as conflict watch.
         self.control(Control::server(NEW_SERVER, self.local))?;
         self.published = true;
         Ok(Publication::Ready)

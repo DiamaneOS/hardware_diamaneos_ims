@@ -297,7 +297,6 @@ fn run() -> io::Result<()> {
                     Err(error) => match classify(&error) {
                         Fault::Retry => (),
                         Fault::PeerGone | Fault::SocketReset => dispatch.socket_reset = true,
-                        Fault::Unexpected if error.kind() == io::ErrorKind::TimedOut => (),
                         Fault::Unexpected => return Err(error),
                     },
                 }
