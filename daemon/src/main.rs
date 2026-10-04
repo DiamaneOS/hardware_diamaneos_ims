@@ -12,7 +12,7 @@ use diamaneos_ims_dcm::{
 };
 use diamaneos_ims_runtime::{
     socket::{Publication, Qrtr},
-    transport::{classify, Fault},
+    transport::{classify, exhausted, Fault},
 };
 mod android_dispatch;
 use android_dispatch::{Broker, Dispatch};
@@ -263,12 +263,10 @@ fn run() -> io::Result<()> {
                 match socket.publish() {
                     Ok(Publication::Ready) => published = true,
                     Ok(Publication::Conflict) => engine.publisher_conflict(),
+                    Err(error) if exhausted(&error) => engine.transport_exhausted(),
                     Err(error)
                         if classify(&error) == Fault::Retry
-                            || error.kind() == io::ErrorKind::TimedOut =>
-                    {
-                        ()
-                    }
+                            || error.kind() == io::ErrorKind::TimedOut => {}
                     Err(error) => return Err(error),
                 }
             }
@@ -326,7 +324,12 @@ fn run() -> io::Result<()> {
             let incoming = match socket.receive(Duration::from_millis(25)) {
                 Ok(packet) => packet,
                 Err(error) => match classify(&error) {
-                    Fault::Retry => None,
+                    Fault::Retry => {
+                        if exhausted(&error) {
+                            engine.transport_exhausted();
+                        }
+                        None
+                    }
                     Fault::PeerGone | Fault::SocketReset => {
                         // A socket-wide receive failure has no destination peer.
                         // Withdraw this modem's state before replacing the socket.
