@@ -7,14 +7,16 @@ final class DefaultNetworkState<N> {
     private boolean wifi;
 
     void available(N next) {
-        if (!next.equals(network)) {
-            network = next;
-            wifi = false;
-        }
+        // A replacement keeps the previous answer until its transports are known.
+        if (!next.equals(network)) network = next;
     }
 
-    void capabilities(N current, boolean wifiOnly) {
-        if (current.equals(network)) wifi = wifiOnly;
+    /**
+     * A default with neither Wi-Fi nor another physical transport is a VPN whose
+     * underlying network is absent or not yet known. It says nothing about Wi-Fi.
+     */
+    void capabilities(N current, boolean hasWifi, boolean hasOther) {
+        if (current.equals(network) && (hasWifi || hasOther)) wifi = hasWifi && !hasOther;
     }
 
     void lost(N previous) {

@@ -118,10 +118,13 @@ ACCESS_NETWORK_STATE permission. Android delivers this metadata separately from
 whether the observer itself is blocked from network access. It reports true only
 for a Wi-Fi default or a VPN with Wi-Fi as its sole physical transport, with the
 existing single-connected-Wi-Fi restriction. Mixed transports, missing capabilities
-and disconnected snapshots produce false. It does not use getActiveNetwork(),
+and disconnected snapshots produce false. A VPN default without any physical
+transport, whose underlying network is absent or not yet known as during lockdown
+reconnects, leaves the previous answer unchanged. It does not use getActiveNetwork(),
 which can hide the default from callers without INTERNET permission, or hidden
-Connectivity APIs. Replacement defaults clear the old state before new capabilities
-arrive; late capabilities/loss from the old network are ignored. This does not change routes,
+Connectivity APIs. A replacement default keeps the previous answer until its own
+capabilities classify it; late capabilities/loss from the old network are ignored.
+Losing the default network without a replacement produces false. This does not change routes,
 bypass a VPN, or assert successful carrier authentication. Withdrawal explicitly
 sets the flag false. No new permissions or identifiers are added.
 
