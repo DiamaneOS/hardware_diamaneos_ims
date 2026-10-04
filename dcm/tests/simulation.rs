@@ -365,6 +365,25 @@ fn lost_broker_fails_then_clears_state() {
     assert_eq!(e.session_count(), 0);
 }
 #[test]
+fn undelivered_bring_up_completes_the_sessions_instead_of_waiting() {
+    let mut e = connected();
+    let a = e.receive(MODEM, &activate(1, 1, 0, false, 0));
+    let r = request(&a);
+    let out = e.bring_up_failed(r);
+    assert!(out.iter().any(|x| matches!(x, Effect::Send(_, b)
+        if Frame::parse(b).unwrap().tlv(2) == Some([0, 0, 13, 0].as_slice()))));
+    assert!(out
+        .iter()
+        .any(|x| matches!(x, Effect::Release(released) if *released == r)));
+    assert_eq!(e.session_count(), 0);
+    assert!(e.bring_up_failed(r).is_empty()); // A stale failure has nothing left to end.
+    e.release_failed();
+    assert_eq!(e.diagnostics().broker_call_failures, 3);
+    assert_eq!(e.diagnostics().broker_losses, 0);
+    let b = e.receive(MODEM, &activate(2, 1, 0, false, 0));
+    assert_ne!(request(&b).serial, r.serial); // The modem's retry files a fresh request.
+}
+#[test]
 fn network_changes_send_address_change_not_extra_activation() {
     let mut e = connected();
     let a = e.receive(MODEM, &activate(1, 1, 0, false, 0));

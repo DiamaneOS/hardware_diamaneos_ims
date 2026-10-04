@@ -333,7 +333,7 @@ fn run() -> io::Result<()> {
                     Fault::PeerGone | Fault::SocketReset => {
                         // A socket-wide receive failure has no destination peer.
                         // Withdraw this modem's state before replacing the socket.
-                        dispatch.purge_all(&mut engine, broker.as_ref())?;
+                        dispatch.purge_all(&mut engine, broker.as_ref());
                         let out = engine.node_gone(node);
                         dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
                         socket = socket.rebind_imsdcm()?;
@@ -353,11 +353,11 @@ fn run() -> io::Result<()> {
                         }
                         Some(c) if c.command == DEL_CLIENT => {
                             let lost = c.deleted_client().unwrap();
-                            dispatch.purge_peer(&mut engine, broker.as_ref(), lost)?;
+                            dispatch.purge_peer(&mut engine, broker.as_ref(), lost);
                             engine.peer_gone(lost)
                         }
                         Some(c) if c.command == BYE => {
-                            dispatch.purge_node(&mut engine, broker.as_ref(), c.words[0])?;
+                            dispatch.purge_node(&mut engine, broker.as_ref(), c.words[0]);
                             engine.node_gone(c.words[0])
                         }
                         _ => vec![],
@@ -384,7 +384,7 @@ fn run() -> io::Result<()> {
                 }
             }
             if std::mem::take(&mut dispatch.socket_reset) {
-                dispatch.purge_all(&mut engine, broker.as_ref())?;
+                dispatch.purge_all(&mut engine, broker.as_ref());
                 let out = engine.node_gone(node);
                 dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
                 socket = socket.rebind_imsdcm()?;
@@ -398,8 +398,8 @@ fn run() -> io::Result<()> {
         }
         Ok(())
     })();
-    let cleanup = dispatch.shutdown(&mut engine, broker.as_ref());
-    operation.and(cleanup)
+    dispatch.shutdown(&mut engine, broker.as_ref());
+    operation
 }
 fn main() {
     if run().is_err() {

@@ -25,94 +25,77 @@ pub struct Dispatch {
     pub broker_lost: Option<u64>,
     pub socket_reset: bool,
 }
-fn callback(result: binder::Result<()>, lost: &mut Option<u64>, epoch: u64) -> io::Result<()> {
+/// Both broker calls are oneway, so only transport errors return. A dead object
+/// loses the broker. Any other error lost this one delivery while the
+/// registration stays valid: the broker only registers again after daemon death,
+/// so neither exiting nor forgetting it would recover. False means that case.
+fn callback(result: binder::Result<()>, lost: &mut Option<u64>, epoch: u64) -> bool {
     match result {
-        Ok(()) => Ok(()),
+        Ok(()) => true,
         Err(error) if error.transaction_error() == StatusCode::DEAD_OBJECT => {
             *lost = Some(epoch);
-            Ok(())
+            true
         }
-        Err(_) => Err(io::Error::other("broker callback failure")),
+        Err(_) => false,
     }
 }
 impl Dispatch {
-    fn release(&mut self, broker: Option<&Broker>, epoch: u64, request: Request) -> io::Result<()> {
+    fn release(
+        &mut self,
+        engine: &mut Engine,
+        broker: Option<&Broker>,
+        epoch: u64,
+        request: Request,
+    ) {
         if let Some((current, callback_binder, _)) = broker {
-            if *current == epoch {
-                callback(
+            if *current == epoch
+                && !callback(
                     callback_binder.release(&super::request(request)),
                     &mut self.broker_lost,
                     epoch,
-                )?;
+                )
+            {
+                engine.release_failed();
             }
         }
-        Ok(())
     }
-    fn finish_purged(
-        &mut self,
-        engine: &mut Engine,
-        broker: Option<&Broker>,
-        work: Vec<Work>,
-    ) -> io::Result<()> {
-        let mut failure = None;
+    fn finish_purged(&mut self, engine: &mut Engine, broker: Option<&Broker>, work: Vec<Work>) {
         for item in work {
             match item {
                 Work::Packet(packet) => engine.finish_output(packet, Disposition::PeerLost),
-                Work::Release { epoch, request } => {
-                    if let Err(error) = self.release(broker, epoch, request) {
-                        failure.get_or_insert(error);
-                    }
-                }
+                Work::Release { epoch, request } => self.release(engine, broker, epoch, request),
             }
         }
-        failure.map_or(Ok(()), Err)
     }
-    pub fn purge_all(&mut self, engine: &mut Engine, broker: Option<&Broker>) -> io::Result<()> {
+    pub fn purge_all(&mut self, engine: &mut Engine, broker: Option<&Broker>) {
         let work = self.queue.drain();
-        self.finish_purged(engine, broker, work)
+        self.finish_purged(engine, broker, work);
     }
-    pub fn purge_peer(
-        &mut self,
-        engine: &mut Engine,
-        broker: Option<&Broker>,
-        peer: Peer,
-    ) -> io::Result<()> {
+    pub fn purge_peer(&mut self, engine: &mut Engine, broker: Option<&Broker>, peer: Peer) {
         let work = self.queue.purge(peer);
-        self.finish_purged(engine, broker, work)
+        self.finish_purged(engine, broker, work);
     }
-    pub fn purge_node(
-        &mut self,
-        engine: &mut Engine,
-        broker: Option<&Broker>,
-        node: u32,
-    ) -> io::Result<()> {
-        let mut failure = None;
+    pub fn purge_node(&mut self, engine: &mut Engine, broker: Option<&Broker>, node: u32) {
         for peer in self
             .queue
             .peers()
             .into_iter()
             .filter(|peer| peer.node == node)
         {
-            if let Err(error) = self.purge_peer(engine, broker, peer) {
-                failure.get_or_insert(error);
-            }
+            self.purge_peer(engine, broker, peer);
         }
-        failure.map_or(Ok(()), Err)
     }
     /// Always dispose all owned output and attempt every remaining release,
     /// including when the operational loop exits through an error.
-    pub fn shutdown(&mut self, engine: &mut Engine, broker: Option<&Broker>) -> io::Result<()> {
-        let mut failure = self.purge_all(engine, broker).err();
+    pub fn shutdown(&mut self, engine: &mut Engine, broker: Option<&Broker>) {
+        self.purge_all(engine, broker);
         for effect in engine.shutdown() {
             if let Effect::Release(request) = effect {
                 if let Some((epoch, _, _)) = broker {
-                    if let Err(error) = self.release(broker, *epoch, request) {
-                        failure.get_or_insert(error);
-                    }
+                    self.release(engine, broker, *epoch, request);
                 }
             }
         }
-        failure.map_or(Ok(()), Err)
     }
     pub fn apply(
         &mut self,
@@ -163,9 +146,9 @@ impl Dispatch {
                     }
                     if let Err(rejected) = self.queue.enqueue(peer, Work::Packet(packet), cost, now)
                     {
-                        self.finish_purged(engine, broker, vec![rejected.token])?;
+                        self.finish_purged(engine, broker, vec![rejected.token]);
                         let work = self.queue.purge(peer);
-                        self.finish_purged(engine, broker, work)?;
+                        self.finish_purged(engine, broker, work);
                         pending.extend(engine.peer_gone(peer));
                     }
                 }
@@ -177,16 +160,18 @@ impl Dispatch {
                         if self.broker_lost == Some(*epoch) {
                             continue;
                         }
-                        callback(
+                        if !callback(
                             b.bringUp(&super::request(request)),
                             &mut self.broker_lost,
                             *epoch,
-                        )?;
+                        ) {
+                            pending.extend(engine.bring_up_failed(request));
+                        }
                     }
                 }
                 Effect::Release(request) => {
                     if let Some((epoch, _, _)) = broker {
-                        self.release(broker, *epoch, request)?;
+                        self.release(engine, broker, *epoch, request);
                     }
                 }
                 Effect::ReleaseAfter { peer, request } => {
@@ -195,9 +180,9 @@ impl Dispatch {
                         self.queue
                             .enqueue(peer, Work::Release { epoch, request }, 0, now)
                     {
-                        self.finish_purged(engine, broker, vec![rejected.token])?;
+                        self.finish_purged(engine, broker, vec![rejected.token]);
                         let work = self.queue.purge(peer);
-                        self.finish_purged(engine, broker, work)?;
+                        self.finish_purged(engine, broker, work);
                         pending.extend(engine.peer_gone(peer));
                     }
                 }
@@ -244,6 +229,7 @@ impl Dispatch {
             let mut broker_lost = None;
             let mut socket_reset = false;
             let mut exhaustion = false;
+            let mut release_failed = false;
             let finished = self.queue.attempt(
                 now,
                 |_, work| match work {
@@ -283,22 +269,20 @@ impl Dispatch {
                         if current != epoch {
                             return Attempt::Obsolete;
                         }
-                        match callback(
+                        release_failed = !callback(
                             b.release(&super::request(*request)),
                             &mut broker_lost,
                             *epoch,
-                        ) {
-                            Ok(()) => Attempt::Submitted,
-                            Err(error) => {
-                                fatal = Some(error);
-                                Attempt::Backpressured
-                            }
-                        }
+                        );
+                        Attempt::Submitted
                     }
                 },
             );
             if exhaustion {
                 engine.transport_exhausted();
+            }
+            if release_failed {
+                engine.release_failed();
             }
             if broker_lost.is_some() {
                 self.broker_lost = broker_lost;
@@ -315,7 +299,7 @@ impl Dispatch {
                     engine.finish_output(packet, Disposition::Obsolete)
                 }
                 Some(Finished::PeerLost(peer, work)) => {
-                    self.finish_purged(engine, broker, work)?;
+                    self.finish_purged(engine, broker, work);
                     let effects = engine.peer_gone(peer);
                     self.apply(socket, engine, broker, effects, now)?;
                 }
