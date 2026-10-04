@@ -357,12 +357,100 @@ fn absent_broker_waits_without_an_ap_timeout() {
     assert_eq!(e.session_count(), 1);
     assert_eq!(e.broker_connected().len(), 1);
 }
+fn terminal(effects: &[Effect]) -> usize {
+    effects
+        .iter()
+        .filter(|e| {
+            matches!(e, Effect::Send(_, b)
+            if Frame::parse(b).unwrap().tlv(2) == Some([0, 0, 13, 0].as_slice()))
+        })
+        .count()
+}
 #[test]
-fn lost_broker_fails_then_clears_state() {
+fn lost_broker_without_reconnection_fails_then_clears_state_after_grace() {
     let mut e = connected();
-    e.receive(MODEM, &activate(1, 1, 0, true, 0));
-    assert!(e.broker_lost().iter().any(|e|matches!(e,Effect::Send(_,b)if Frame::parse(b).unwrap().tlv(2)==Some([0,0,13,0].as_slice()))));
+    let a = e.receive(MODEM, &activate(1, 1, 0, true, 0));
+    e.receive(MODEM, &activate(2, 2, 0, false, 0));
+    e.broker_lost(1_000);
+    assert_eq!(e.session_count(), 2);
+    assert_eq!(e.next_deadline(), Some(1_000 + BROKER_GRACE_MS));
+    assert!(e.expire(1_000 + BROKER_GRACE_MS - 1).is_empty());
+    let out = e.expire(1_000 + BROKER_GRACE_MS);
+    assert_eq!(terminal(&out), 2);
+    assert!(out
+        .iter()
+        .any(|x| matches!(x, Effect::Release(r) if *r == request(&a))));
     assert_eq!(e.session_count(), 0);
+    assert_eq!(e.next_deadline(), None);
+    assert!(e.expire(u64::MAX).is_empty());
+    let diagnostics = e.diagnostics();
+    assert_eq!(
+        (diagnostics.broker_losses, diagnostics.broker_grace_expiries),
+        (1, 1)
+    );
+    assert_eq!(diagnostics.active_groups, 0);
+}
+#[test]
+fn broker_reconnecting_within_grace_refiles_kept_groups() {
+    let mut e = connected();
+    let packet = activate(1, 1, 0, false, 0);
+    let a = e.receive(MODEM, &packet);
+    let old = request(&a);
+    assert_eq!(e.report(old, Some(network())).len(), 1);
+    e.broker_lost(0);
+    assert!(e.report(old, Some(network())).is_empty()); // The lost broker's network is revoked.
+                                                        // A repeated activation during grace keeps its context without an address.
+    let repeat = e.receive(MODEM, &packet);
+    assert_eq!(repeat.len(), 1);
+    assert_eq!(pdp(&repeat), pdp(&a));
+    // A new activation during grace waits for the next broker like at startup.
+    let emergency = e.receive(MODEM, &activate(2, 1, 0, true, 0));
+    assert!(!emergency.iter().any(|x| matches!(x, Effect::BringUp(_))));
+    let refiled = e.broker_connected();
+    let keys: Vec<_> = refiled
+        .iter()
+        .filter_map(|x| match x {
+            Effect::BringUp(r) => Some(r.key),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(keys.len(), 2);
+    assert!(keys.contains(&old.key));
+    assert_eq!(terminal(&refiled), 0);
+    assert_eq!(e.session_count(), 2);
+    assert_eq!(e.next_deadline(), None);
+    let new = refiled
+        .iter()
+        .find_map(|x| match x {
+            Effect::BringUp(r) if r.key == old.key => Some(*r),
+            _ => None,
+        })
+        .unwrap();
+    assert_ne!(new.serial, old.serial);
+    let up = e.report(new, Some(network()));
+    assert_eq!(up.len(), 1);
+    let Effect::Send(_, bytes) = &up[0] else {
+        panic!()
+    };
+    assert_eq!(Frame::parse(bytes).unwrap().id, ACTIVATE); // A fresh UP, not a change.
+    assert!(e.expire(BROKER_GRACE_MS).is_empty());
+    assert_eq!(e.diagnostics().broker_grace_expiries, 0);
+}
+#[test]
+fn modem_loss_during_grace_releases_groups_and_ends_the_grace_period() {
+    let mut e = connected();
+    let a = e.receive(MODEM, &activate(1, 1, 0, false, 0));
+    e.broker_lost(0);
+    let out = e.node_gone(MODEM.node);
+    assert!(out
+        .iter()
+        .any(|x| matches!(x, Effect::Release(r) if *r == request(&a))));
+    assert_eq!(terminal(&out), 0); // Nobody is left to tell.
+    assert_eq!(e.session_count(), 0);
+    assert_eq!(e.next_deadline(), None);
+    assert!(e.expire(BROKER_GRACE_MS).is_empty());
+    assert!(e.broker_connected().is_empty());
+    assert_eq!(e.diagnostics().broker_grace_expiries, 0);
 }
 #[test]
 fn undelivered_bring_up_completes_the_sessions_instead_of_waiting() {
