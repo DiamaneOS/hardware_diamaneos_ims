@@ -16,6 +16,10 @@ struct Address {
     node: u32,
     port: u32,
 }
+pub enum Publication {
+    Ready,
+    Conflict,
+}
 pub struct Qrtr {
     fd: OwnedFd,
     local: Peer,
@@ -134,8 +138,38 @@ impl Qrtr {
         if rc == 0 {
             return Ok(None);
         }
-        if p.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
-            return Err(io::Error::other("QRTR unavailable"));
+        if p.revents & libc::POLLNVAL != 0 {
+            return Err(io::Error::from_raw_os_error(libc::EBADF));
+        }
+        if p.revents & libc::POLLHUP != 0 {
+            return Err(io::Error::from_raw_os_error(libc::ENETRESET));
+        }
+        if p.revents & libc::POLLERR != 0 {
+            let mut error: libc::c_int = 0;
+            let mut size = mem::size_of_val(&error) as libc::socklen_t;
+            // SAFETY: fixed integer output and matching length; this only reads
+            // the kernel's queued socket error, it changes no routing or policy.
+            let result = unsafe {
+                libc::getsockopt(
+                    self.fd.as_raw_fd(),
+                    libc::SOL_SOCKET,
+                    libc::SO_ERROR,
+                    (&mut error as *mut libc::c_int).cast(),
+                    &mut size,
+                )
+            };
+            if result < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if size as usize != mem::size_of_val(&error) {
+                return Err(io::Error::other("socket error width"));
+            }
+            if error != 0 {
+                return Err(io::Error::from_raw_os_error(error));
+            }
+            if p.revents & libc::POLLIN == 0 {
+                return Ok(None);
+            }
         }
         let mut bytes = [0u8; MAX_DATAGRAM];
         let mut a = Address {
@@ -188,7 +222,7 @@ impl Qrtr {
             &c.encode(),
         )
     }
-    pub fn publish(&mut self) -> io::Result<()> {
+    pub fn publish(&mut self) -> io::Result<Publication> {
         self.control(Control::lookup(NEW_LOOKUP))?;
         let deadline = Instant::now() + Duration::from_secs(2);
         let mut complete = false;
@@ -205,10 +239,7 @@ impl Qrtr {
                 if let Some(c) = Control::decode(&data) {
                     if c.conflicting_server() {
                         self.control(Control::lookup(DEL_LOOKUP))?;
-                        return Err(io::Error::new(
-                            io::ErrorKind::AlreadyExists,
-                            "DCM service already present",
-                        ));
+                        return Ok(Publication::Conflict);
                     }
                     if c.lookup_complete() {
                         complete = true;
@@ -226,7 +257,7 @@ impl Qrtr {
         }
         self.control(Control::server(NEW_SERVER, self.local))?;
         self.published = true;
-        Ok(())
+        Ok(Publication::Ready)
     }
 }
 impl Drop for Qrtr {

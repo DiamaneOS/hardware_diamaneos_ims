@@ -468,3 +468,28 @@ fn superseded_unacknowledged_switch_is_reconciled_with_a_new_transaction() {
     }
     assert!(s.settled());
 }
+
+#[test]
+fn startup_clears_both_contexts_without_guessing_switch_before_observation() {
+    for subscription in [1, 2] {
+        let mut session = Session::new(subscription, u64::from(subscription)).unwrap();
+        for message in [0x27, 0x38, 0x20, 0x43] {
+            let packet = session.poll(0).unwrap();
+            assert_eq!(packet[3], message);
+            session.receive(&ack(&packet));
+        }
+        assert_eq!(session.diagnostics().stage, 9);
+        assert!(!session.settled());
+        assert!(session.poll(10_000).is_none());
+        session.observe(Observation {
+            enabled: true,
+            network: None,
+        });
+        for message in [0x43, 0x20, 0x34] {
+            let packet = session.poll(10_001).unwrap();
+            assert_eq!(packet[3], message);
+            session.receive(&ack(&packet));
+        }
+        assert!(session.settled());
+    }
+}

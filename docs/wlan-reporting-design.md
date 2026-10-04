@@ -170,50 +170,58 @@ Observer:
 
 ## Non-sensitive status
 
-On debuggable builds, the observer queries `getStatus` through its authenticated, generation-bound
-Binder connection. The reporter returns fixed numeric progress for the two modem
-contexts, with no BSSID, IP address, network handle, packet bytes or SIM identity.
-The observer emits only changed status via Android Log. The paired status has
-ten integers: stage, operation and core error for each context, plus keepalive
-and profile-channel errors for each context. Release observers omit this polling;
-there are no lifecycle traces, histograms or exported traffic counters.
-Diagnostic-query failures do not invalidate an
-already delivered observation. The reporter's socket
-seccomp filter is not widened for logging; init routes its standard error to
-`/dev/null`, so stderr is not evidence of device progress.
+On debuggable builds, the observer queries `getStatus` over its authenticated,
+generation-bound Binder connection and logs only changed status via Android Log.
 
-Stages are -1 (no endpoint/observation yet), 0 (bind), 1 (startup clear), 2 (switch),
-3 (STA status), 4 (acknowledged unavailable), 5 (acknowledged available), 6 (failed),
-7 (default connectivity profile), and 8 (notification registration). Settled
-states require both connectivity acknowledgements.
-Operation is the pending or failed message ID. Error0 means no recorded failure,
-positive values are QMI errors, -1 is timeout, -2 transaction exhaustion, and -3
-local encoding failure. Keepalive error -4 records a discarded valid instruction
-at queue capacity; it stays visible until context replacement, without blocking
-core connectivity. Status is sampled asynchronously; it does not establish
-IMS registration or call acceptance. An unavailable diagnostic connection cannot
-renew an observation lease. Both endpoints and their generated interface libraries
-must be updated together as part of the coherent OS build.
+- The reporter returns fixed numeric progress for the two modem contexts: no
+  BSSID, IP address, network handle, packet bytes or SIM identity.
+- Ten integers: stage, operation and core error for each context, plus
+  keepalive and profile-channel errors for each context.
+- User builds skip this polling. There are no lifecycle traces,
+  histograms or exported traffic counters.
+- Diagnostic-query failures do not invalidate an already delivered observation,
+  and an unavailable diagnostic connection cannot renew an observation lease.
+- The reporter's socket seccomp filter is not widened for logging. Init routes
+  its standard error to `/dev/null`, so stderr is no evidence of device
+  progress.
+- Status is sampled asynchronously. It does not establish IMS registration or
+  call acceptance.
 
-The temporary observation-state and address-rejection instrumentation used during
-IPv6 bring-up has been removed. Address filtering and snapshot consistency checks
-remain unchanged.
+Stages: -1 no endpoint/observation yet, 0 bind, 1 startup clear, 2 switch,
+3 STA status, 4 acknowledged unavailable, 5 acknowledged available, 6 failed,
+7 default connectivity profile, 8 notification registration, 9 startup clears
+acknowledged and awaiting an authenticated observation. Settled states need both
+connectivity acknowledgements.
+
+- Operation: the pending or failed message ID.
+- Error: 0 no recorded failure, positive values are QMI errors, -1 timeout,
+  -2 transaction exhaustion, -3 local encoding failure.
+- Keepalive error -4: a valid instruction discarded at queue capacity. It stays
+  visible until context replacement and does not block core connectivity.
 
 ## Scheduling and containment limits
 
-The observer's named ten-second heartbeat refreshes a thirty-second lease; actual
-network changes and current-reporter death schedule immediate publication.
-Expiry withdraws the last positive network without guessing a switch change.
-The reporter processes at most eight received datagrams per context per cycle,
-then polls each independent deadline machine; its ordinary loop period is250ms.
-A failed session permits at most three renewals per unchanged observation,
-spaced thirty seconds apart. These are downstream bounds on repeated work,
-not carrier registration timers or a promise of registration within that period.
+- The observer's ten-second heartbeat refreshes a thirty-second lease. Real
+  network changes and current-reporter death trigger immediate publication.
+- Expiry withdraws the last positive network without guessing a switch change.
+- The reporter handles at most eight received datagrams per context per cycle,
+  then polls each independent deadline machine. Its ordinary loop period is
+  250 ms.
+- A failed session gets at most three fresh client attempts (renewals) per
+  unchanged observation, thirty seconds apart.
+- These are downstream bounds on repeated work, not carrier registration timers
+  or a promise of registration within that time.
+- SIGTERM/SIGINT shutdown attempts withdrawal for at most 2.5 seconds, polling
+  every 50 ms: one two-second protocol deadline plus scheduling margin, while
+  bounding shutdown. Android init's default stop/restart uses SIGKILL and does
+  not exercise this handler. Forced termination or an unavailable modem cannot
+  promise withdrawal.
+- No timer fabricates connectivity or bypasses protocol acknowledgements.
+- Keep heartbeat and lease values coherent when changing this policy.
 
-SIGTERM/SIGINT shutdown attempts withdrawal for at most2.5seconds, with50ms polling.
-That allows one two-second protocol deadline plus scheduling margin, while
-bounding process shutdown. Android init's default stop/restart uses SIGKILL;
-it does not exercise this graceful handler. Forced termination or an unavailable modem cannot promise
-withdrawal. None of these timers fabricates connectivity or bypasses protocol
-acknowledgements. Keep observer heartbeat and lease values coherent when changing
-this scheduling policy; exact recovery remains a native qualification gate.
+Startup reconciliation runs independently of observer delivery: discover and
+bind, register notifications, clear station availability and default profile0,
+then wait. Unknown Wi-Fi administrative state is preserved. No switch value or
+positive connectivity is sent until an authenticated observation arrives. The
+init restart floor and protocol renewal limits are separate, and neither
+guarantees carrier registration.

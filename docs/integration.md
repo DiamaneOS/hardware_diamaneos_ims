@@ -19,7 +19,8 @@ stack in a product.
    QRTR domain inventory instead of copying another device's grants.
 3. Set `DIAMANEOS_IMS_MODEM_NODE` from verified device topology and
    `DIAMANEOS_IMS_SLOTS` from the product, and include `ims-product.mk`. It
-   emergency PDN service by default; kill switches are diagnostic controls only.
+   selects emergency PDN service by default. Its kill-switch properties reset at
+   every boot and cannot be changed on user builds.
 4. Build `imsdcmd`, `DiamaneOSImsBroker` and the policy with ordinary hardening
    and neverallow checks. AIDL V1 is frozen and hash-checked locally. The
    platform build must also run its native API compatibility checks.

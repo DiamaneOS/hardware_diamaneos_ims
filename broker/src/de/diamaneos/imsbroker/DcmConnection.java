@@ -71,7 +71,7 @@ final class DcmConnection {
         try {
             b.linkToDeath(death, 0);
             IImsDcm dcm = IImsDcm.Stub.asInterface(b);
-            if (dcm.getInterfaceVersion() != IImsDcm.VERSION) {
+            if (dcm.getInterfaceVersion() < IImsDcm.VERSION) {
                 Log.e("ImsBroker", "unsupported DCM interface version");
                 lost(b);
                 return;
