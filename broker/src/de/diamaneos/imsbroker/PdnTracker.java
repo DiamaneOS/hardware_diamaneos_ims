@@ -104,7 +104,6 @@ final class PdnTracker extends ConnectivityManager.NetworkCallback {
         NetworkCapabilities caps = mState.capabilities();
         if (caps == null) return 2;
         if (mState.links() == null) return 3;
-        if (!mState.usable()) return 4;
         if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) return 5;
         if (!caps.hasCapability(capability())) return 6;
         if (!specifierMatches(caps.getNetworkSpecifier())) return 7;
@@ -141,7 +140,8 @@ final class PdnTracker extends ConnectivityManager.NetworkCallback {
 
     /**
      * True from onAvailable() until that network's capabilities and link properties are known and
-     * the network is not blocked for this UID. ConnectivityService delivers them in the same
+     * UID firewall status is deliberately excluded: the modem consumes this restricted bearer,
+     * while the broker sends no IP traffic. ConnectivityService delivers metadata in the same
      * dispatch as onAvailable (ConnectivityManager's four-argument onAvailable), so this only spans
      * the calls of one dispatch.
      */
@@ -178,7 +178,8 @@ final class PdnTracker extends ConnectivityManager.NetworkCallback {
 
     @Override
     public void onBlockedStatusChanged(Network network, boolean blocked) {
-        if (mState.blocked(network, blocked)) mListener.onTrackerChanged(this);
+        // The broker's firewall/VPN state does not describe the modem's IMS/EIMS bearer.
+        // Application traffic still uses its own UID permissions and VPN lockdown policy.
     }
 
     @Override

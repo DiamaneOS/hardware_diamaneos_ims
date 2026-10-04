@@ -8,10 +8,9 @@
 
      - One privileged permission, CONNECTIVITY_USE_RESTRICTED_NETWORKS, which
        ConnectivityService requires for the restricted IMS and EIMS requests.
-       INTERNET (the revocable Network permission on our base) lets Android track this
-       persistent UID in its background firewall. Without it, Android 17
-       reports connected IMS bearers as blocked for the broker. SELinux
-       still forbids IP/raw/modem sockets; the broker sends no network traffic.
+       UID firewall/VPN status is not the physical modem bearer's status.
+       This broker files restricted requests and reports metadata; it never
+       opens IP/raw/modem sockets or forwards application traffic.
        No location or phone-state permission (getSubscriptionId needs none).
      - No components: nothing can bind to it, start it or send it intents.
      - persistent and directBootAware: running at boot, before the first
@@ -24,7 +23,6 @@
     package="de.diamaneos.imsbroker">
 
     <uses-permission android:name="android.permission.CONNECTIVITY_USE_RESTRICTED_NETWORKS" />
-    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:name=".ImsBrokerApp"

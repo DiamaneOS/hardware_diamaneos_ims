@@ -17,11 +17,13 @@ init_daemon_domain(diamaneos_imsdcm)
 # callback (a reference only the daemon holds).
 binder_use(diamaneos_imsdcm)
 add_service(diamaneos_imsdcm, diamaneos_imsdcm_service)
-binder_call(diamaneos_imsdcm, diamaneos_ims_broker_app)
+# The frozen callback carries Binder references and values, never file descriptors.
+allow diamaneos_imsdcm diamaneos_ims_broker_app:binder { call transfer };
+allow diamaneos_ims_broker_app diamaneos_imsdcm:binder transfer;
 
 # QRTR, without ioctls: binding an ephemeral port, publishing the service to
 # the kernel name service and exchanging QMI messages are plain socket calls.
-allow diamaneos_imsdcm self:qipcrtr_socket { create bind getattr getopt setopt read write };
+allow diamaneos_imsdcm self:qipcrtr_socket { create bind getattr getopt read write };
 
 # Kill switches and the build-time emergency policy (property.te).
 get_prop(diamaneos_imsdcm, vendor_diamaneos_imsdcm_prop)
@@ -35,10 +37,7 @@ get_prop(diamaneos_imsdcm, timezone_prop)
 # Keep it that way.
 neverallow diamaneos_imsdcm self:global_capability_class_set *;
 neverallow diamaneos_imsdcm self:global_capability2_class_set *;
-neverallow diamaneos_imsdcm self:{
-  tcp_socket udp_socket rawip_socket packet_socket tipc_socket
-  netlink_socket netlink_route_socket netlink_generic_socket
-} *;
+neverallow diamaneos_imsdcm self:{ diamaneos_nonlocal_socket_classes } create;
 # coredump_file (userdebug) and method_trace_data_file (coverage builds) are
 # granted to every domain by the platform policy.
 neverallow diamaneos_imsdcm {

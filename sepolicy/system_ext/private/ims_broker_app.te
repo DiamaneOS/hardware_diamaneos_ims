@@ -21,6 +21,4 @@ allow diamaneos_ims_broker_app app_data_file:{ file lnk_file } create_file_perms
 
 # No sockets beyond the local ones every app has: it sends no traffic and
 # never speaks QMI.
-neverallow diamaneos_ims_broker_app self:{
-  tcp_socket udp_socket rawip_socket packet_socket qipcrtr_socket
-} *;
+neverallow diamaneos_ims_broker_app self:{ diamaneos_nonlocal_socket_classes qipcrtr_socket } create;

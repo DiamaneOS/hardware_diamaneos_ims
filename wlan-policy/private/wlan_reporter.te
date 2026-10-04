@@ -5,12 +5,12 @@ init_daemon_domain(diamaneos_wlan_reporter)
 binder_use(diamaneos_wlan_reporter)
 type diamaneos_wlan_reporter_service, service_manager_type;
 add_service(diamaneos_wlan_reporter, diamaneos_wlan_reporter_service)
-allow diamaneos_wlan_reporter self:qipcrtr_socket { create bind getattr getopt setopt read write };
+allow diamaneos_wlan_reporter self:qipcrtr_socket { create bind getattr getopt read write };
 allow diamaneos_wlan_reporter selinuxfs:file r_file_perms;
 
 neverallow diamaneos_wlan_reporter self:global_capability_class_set *;
 neverallow diamaneos_wlan_reporter self:global_capability2_class_set *;
-neverallow diamaneos_wlan_reporter self:{ tcp_socket udp_socket rawip_socket packet_socket tipc_socket netlink_socket netlink_route_socket netlink_xfrm_socket netlink_generic_socket } *;
+neverallow diamaneos_wlan_reporter self:{ diamaneos_nonlocal_socket_classes } create;
 neverallow diamaneos_wlan_reporter { data_file_type -coredump_file -method_trace_data_file }:file { create write append rename link unlink setattr };
 neverallow diamaneos_wlan_reporter property_type:property_service set;
 neverallow { domain -diamaneos_wlan_observer -servicemanager -su } diamaneos_wlan_reporter:binder call;
