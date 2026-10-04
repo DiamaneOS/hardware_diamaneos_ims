@@ -30,26 +30,35 @@
 | Other known commands | Explicit failure, matching the observed unsupported form |
 | Unknown/malformed requests | Decode error. Non-request datagrams are ignored |
 
-Activation slot comes from TLV `0x12` (one-based); `0x13` is the instance, not
-the SIM slot. Unknown slot values are rejected rather than silently choosing a
-SIM. IP family is 0 for IPv4 and 1 for IPv6. Address payloads are bounded to 40
-ASCII bytes. Normal and emergency Android capabilities are separate. The core
-never supplies a fabricated fallback IP address.
+- Activation slot comes from TLV `0x12` (one-based). `0x13` is the instance,
+  not the SIM slot. Unknown slot values are rejected, never mapped to a SIM.
+- IP family: 0 for IPv4, 1 for IPv6. Address payloads are at most 40 ASCII
+  bytes.
+- Normal and emergency Android capabilities are separate. The core never
+  supplies a fabricated fallback IP address.
+- Stricter than stock, on purpose: ambiguous duplicate TLVs, invalid slots,
+  unusable addresses, exhausted capacity and stale broker reports are rejected.
+  Broker/network loss is reported as failure and clears the held sessions.
+  These choices need modem compatibility checks.
 
-Intentional stricter behavior includes rejecting ambiguous duplicate TLVs,
-invalid slots, unusable addresses, exhausted capacity and stale broker reports.
-Broker/network loss is surfaced as failure and clears the held sessions. Those
-choices need modem compatibility checks. The WLAN timezone reply uses eight
-little-endian 16-bit values (second, minute, hour, day, month, year, Sunday-based
-weekday, signed standard offset west of UTC in 15-minute units), followed by
-64-bit UTC seconds. Local fields include daylight saving; the offset follows
-the observed stock non-DST convention. Conversion failure is explicit failure.
-This command alone does not implement or qualify Wi-Fi calling.
+## WLAN timezone reply
 
-The configured modem node is an integration input. It is not learned from the
-first packet. QRTR control packets are accepted from the local control endpoint;
-ordinary client requests must come from the configured remote node. Publication
-checks for an existing service first. If that lookup does not complete within two
-seconds, the daemon publishes anyway: the paired kernel reserves the port and
-service for this role. It keeps the conflict watch active and withdraws its own
-registration on exit. A competing publisher stops the daemon.
+- Eight little-endian 16-bit values (second, minute, hour, day, month, year,
+  Sunday-based weekday, signed standard offset west of UTC in 15-minute units),
+  then 64-bit UTC seconds.
+- Local fields include daylight saving. The offset follows the observed stock
+  non-DST convention. Conversion failure is explicit failure.
+- This command alone does not implement or qualify Wi-Fi calling.
+
+## Modem node and publication
+
+- The modem node is an integration input, not learned from the first packet.
+- QRTR control packets are accepted from the local control endpoint. Ordinary
+  client requests must come from the configured remote node.
+- Publication checks for an existing service first. If that lookup takes more
+  than two seconds, the daemon publishes anyway: the paired kernel reserves the
+  port and service for this role. The conflict watch stays active, and the
+  daemon withdraws its registration on exit.
+- Another publisher on the local node blocks publication until a later retry
+  and is counted. Existing clients are still served. The daemon's own record is
+  not a conflict. Records on other nodes are counted and ignored.
