@@ -121,28 +121,30 @@ Process isolation, permission review and lifecycle requirements: see
 
 ## Default-route metadata
 
-The authenticated stock STA builder copies its default-route boolean to native
-request offset `0xe5` (presence byte `0xe4`). The IDL maps it to optional TLV
-`0x24`, one byte; the stock sender labels it `is_default_route`. This is separate
-from Android validation and connection-state TLV `0x21`.
-
-The observer uses default-network callback capabilities with its existing
-ACCESS_NETWORK_STATE permission. Android delivers this metadata separately from
-whether the observer itself is blocked from network access. It reports true only
-for a Wi-Fi default or a VPN with Wi-Fi as its sole physical transport, with the
-existing single-connected-Wi-Fi restriction. Mixed transports, missing capabilities
-and disconnected snapshots produce false. It does not use getActiveNetwork(),
-which can hide the default from callers without INTERNET permission, or hidden
-Connectivity APIs. Replacement defaults clear the old state before new capabilities
-arrive; late capabilities/loss from the old network are ignored. This does not change routes,
-bypass a VPN, or assert successful carrier authentication. Withdrawal explicitly
-sets the flag false. No new permissions or identifiers are added.
-
-The stock relay uses the default-network callback and transport capabilities to
-recognise Wi-Fi underneath a VPN. The downstream rule is conservative for mixed
-underlays and retains the existing single-Wi-Fi-link restriction. Stock also
-reports this flag in a separate default-profile message. Whether the complete
-report sequence resolves FP6 reconnects requires device qualification.
+- The authenticated stock STA builder copies its default-route boolean to
+  native request offset `0xe5` (presence byte `0xe4`). The IDL maps it to
+  optional one-byte TLV `0x24`, which the stock sender labels
+  `is_default_route`.
+  It is separate from Android validation and connection-state TLV `0x21`.
+- The observer uses default-network callback capabilities with its existing
+  ACCESS_NETWORK_STATE permission. Android delivers them regardless of whether
+  the observer itself is blocked from the network.
+- **True** only for a Wi-Fi default, or a VPN with Wi-Fi as its sole physical
+  transport, within the single-connected-Wi-Fi restriction.
+- **False** for mixed transports, missing capabilities, disconnected snapshots,
+  withdrawal, and loss of the default network without a replacement.
+- **Unchanged** for a VPN default without a physical transport whose underlying
+  network is absent or not yet known (as during lockdown reconnects).
+- A replacement default keeps the previous answer until its own capabilities
+  classify it. Late capabilities/loss from the old network are ignored.
+- Not used: getActiveNetwork(), which can hide the default from callers
+  without INTERNET permission, and hidden Connectivity APIs.
+- No route changes, VPN bypass, claim of carrier authentication, new
+  permissions or identifiers.
+- The stock relay recognises Wi-Fi under a VPN from the default-network
+  callback and transport capabilities. The downstream rule is conservative for
+  mixed underlays. Stock also reports this flag in a separate default-profile
+  message.
 
 ## Default connectivity profile
 
