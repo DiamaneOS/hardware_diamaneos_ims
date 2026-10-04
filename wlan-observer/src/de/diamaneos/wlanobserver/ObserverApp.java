@@ -79,12 +79,14 @@ public final class ObserverApp extends Application {
             @Override public void onAvailable(Network n) { defaultState.available(n); changed(); }
             @Override public void onLost(Network n) { defaultState.lost(n); changed(); }
             @Override public void onCapabilitiesChanged(Network n, NetworkCapabilities caps) {
-                boolean wifiOnly = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
+                // A VPN default carries its underlying networks' transports.
+                boolean other = false;
                 for (int transport : caps.getTransportTypes()) {
                     if (transport != NetworkCapabilities.TRANSPORT_WIFI
-                            && transport != NetworkCapabilities.TRANSPORT_VPN) wifiOnly = false;
+                            && transport != NetworkCapabilities.TRANSPORT_VPN) other = true;
                 }
-                defaultState.capabilities(n, wifiOnly);
+                defaultState.capabilities(
+                        n, caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI), other);
                 changed();
             }
             private void changed() {

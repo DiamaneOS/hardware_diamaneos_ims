@@ -8,26 +8,42 @@ public final class DefaultNetworkStateTest {
     public static void main(String[] args) {
         DefaultNetworkState<String> state = new DefaultNetworkState<>();
         expect(!state.usesWifi());
-        state.capabilities("old", true);
+        state.capabilities("old", true, false);
         expect(!state.usesWifi());
         state.available("wifi");
         expect(!state.usesWifi());
-        state.capabilities("wifi", true);
+        state.capabilities("wifi", true, false);
         expect(state.usesWifi());
+        // A replacement keeps the previous answer until its own transports are known.
         state.available("vpn");
-        expect(!state.usesWifi());
-        state.capabilities("wifi", true);
-        expect(!state.usesWifi());
-        state.capabilities("vpn", true);
+        expect(state.usesWifi());
+        state.capabilities("wifi", false, true);
+        expect(state.usesWifi());
+        // A VPN without a known underlying network does not withdraw Wi-Fi.
+        state.capabilities("vpn", false, false);
+        expect(state.usesWifi());
         state.lost("wifi");
         expect(state.usesWifi());
-        state.capabilities("vpn", false);
+        state.capabilities("vpn", false, true);
         expect(!state.usesWifi());
-        state.capabilities("vpn", true);
+        // Nor does it claim Wi-Fi after a cellular underlay.
+        state.capabilities("vpn", false, false);
+        expect(!state.usesWifi());
+        state.capabilities("vpn", true, false);
+        expect(state.usesWifi());
+        state.capabilities("vpn", true, true);
+        expect(!state.usesWifi());
+        state.capabilities("vpn", true, false);
         state.lost("vpn");
         expect(!state.usesWifi());
-        state.capabilities("vpn", true);
+        state.capabilities("vpn", true, false);
         expect(!state.usesWifi());
-        System.out.println("Default transport lifecycle: replacement, stale callbacks and loss passed");
+        state.available("wifi");
+        state.capabilities("wifi", true, false);
+        state.available("cellular");
+        state.capabilities("cellular", false, true);
+        expect(!state.usesWifi());
+        System.out.println(
+                "Default transport lifecycle: replacement, VPN underlay, stale callbacks and loss passed");
     }
 }
