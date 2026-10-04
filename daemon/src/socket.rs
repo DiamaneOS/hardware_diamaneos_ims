@@ -206,7 +206,7 @@ impl Qrtr {
                 node: a.node,
                 port: a.port,
             },
-            bytes[..n as usize].to_vec(),
+            bytes[..n].to_vec(),
         )))
     }
     fn control(&self, c: Control) -> io::Result<()> {
