@@ -46,5 +46,7 @@ This command alone does not implement or qualify Wi-Fi calling.
 The configured modem node is an integration input. It is not learned from the
 first packet. QRTR control packets are accepted from the local control endpoint;
 ordinary client requests must come from the configured remote node. Publication
-checks for an existing service first, keeps the conflict watch active, and withdraws
-its own registration on exit. A competing publisher stops the daemon.
+checks for an existing service first. If that lookup does not complete within two
+seconds, the daemon publishes anyway: the paired kernel reserves the port and
+service for this role. It keeps the conflict watch active and withdraws its own
+registration on exit. A competing publisher stops the daemon.
