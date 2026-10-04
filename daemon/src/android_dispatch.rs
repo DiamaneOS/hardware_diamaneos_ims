@@ -67,6 +67,41 @@ impl Dispatch {
             }
         }
     }
+    /// Backpressure is not loss. End the stalled peer's sessions toward it and
+    /// queue its still-valid output again behind a fresh deadline; sessions are
+    /// dropped silently only once the peer has actually gone.
+    fn stalled(
+        &mut self,
+        engine: &mut Engine,
+        broker: Option<&Broker>,
+        peer: Peer,
+        work: Vec<Work>,
+        now: u64,
+    ) -> Vec<Effect> {
+        let effects = engine.peer_stalled(peer);
+        for item in work {
+            let keep = match &item {
+                Work::Packet(packet) => engine.prepare_output(packet).is_some(),
+                Work::Release { epoch, .. } => broker.is_some_and(|b| b.0 == *epoch),
+            };
+            match item {
+                Work::Packet(packet) if !keep => {
+                    engine.finish_output(packet, Disposition::Obsolete)
+                }
+                Work::Release { .. } if !keep => (),
+                item => {
+                    let cost = match &item {
+                        Work::Packet(packet) => packet.wire_size_bound(),
+                        Work::Release { .. } => 0,
+                    };
+                    if let Err(rejected) = self.queue.enqueue(peer, item, cost, now) {
+                        self.finish_purged(engine, broker, vec![rejected.token]);
+                    }
+                }
+            }
+        }
+        effects
+    }
     pub fn purge_all(&mut self, engine: &mut Engine, broker: Option<&Broker>) {
         let work = self.queue.drain();
         self.finish_purged(engine, broker, work);
@@ -146,10 +181,9 @@ impl Dispatch {
                     }
                     if let Err(rejected) = self.queue.enqueue(peer, Work::Packet(packet), cost, now)
                     {
-                        self.finish_purged(engine, broker, vec![rejected.token]);
-                        let work = self.queue.purge(peer);
-                        self.finish_purged(engine, broker, work);
-                        pending.extend(engine.peer_gone(peer));
+                        let mut work = self.queue.purge(peer);
+                        work.push(rejected.token);
+                        pending.extend(self.stalled(engine, broker, peer, work, now));
                     }
                 }
                 Effect::BringUp(request) => {
@@ -180,10 +214,9 @@ impl Dispatch {
                         self.queue
                             .enqueue(peer, Work::Release { epoch, request }, 0, now)
                     {
-                        self.finish_purged(engine, broker, vec![rejected.token]);
-                        let work = self.queue.purge(peer);
-                        self.finish_purged(engine, broker, work);
-                        pending.extend(engine.peer_gone(peer));
+                        let mut work = self.queue.purge(peer);
+                        work.push(rejected.token);
+                        pending.extend(self.stalled(engine, broker, peer, work, now));
                     }
                 }
                 Effect::ReadTime {
@@ -301,6 +334,10 @@ impl Dispatch {
                 Some(Finished::PeerLost(peer, work)) => {
                     self.finish_purged(engine, broker, work);
                     let effects = engine.peer_gone(peer);
+                    self.apply(socket, engine, broker, effects, now)?;
+                }
+                Some(Finished::Expired(peer, work)) => {
+                    let effects = self.stalled(engine, broker, peer, work, now);
                     self.apply(socket, engine, broker, effects, now)?;
                 }
                 _ => (),
