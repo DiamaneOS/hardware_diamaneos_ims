@@ -58,8 +58,15 @@ impl Control {
     pub fn lookup_complete(self) -> bool {
         self.command == NEW_SERVER && self.words == [0; 4]
     }
+    /// Another publisher on this node. The daemon's own record, including a
+    /// stale one from before a rebind of the fixed port, is not a conflict.
     pub fn conflicts_with(self, local: Peer) -> bool {
-        self.conflicting_server() && (self.words[2] != local.node || self.words[3] != local.port)
+        self.conflicting_server() && self.words[2] == local.node && self.words[3] != local.port
+    }
+    /// A record on another node cannot take the local reserved role; it is
+    /// counted, not treated as a conflict.
+    pub fn remote_server(self, local: Peer) -> bool {
+        self.conflicting_server() && self.words[2] != local.node
     }
     pub fn conflicting_server(self) -> bool {
         self.command == NEW_SERVER

@@ -126,6 +126,8 @@ pub struct Diagnostics {
     pub broker_call_failures: u64,
     // Failed attempts to replace the reserved-port socket; each is retried.
     pub socket_rebind_failures: u64,
+    // Records of this service on other nodes; they are not local conflicts.
+    pub remote_publisher_records: u64,
 }
 /// Device configuration fixes the modem node and number of slots; no first-packet trust.
 pub struct Engine {
@@ -163,6 +165,10 @@ impl Engine {
     pub fn publisher_conflict(&mut self) {
         self.diagnostics.publisher_conflicts =
             self.diagnostics.publisher_conflicts.saturating_add(1);
+    }
+    pub fn remote_publisher(&mut self) {
+        self.diagnostics.remote_publisher_records =
+            self.diagnostics.remote_publisher_records.saturating_add(1);
     }
     pub fn publication_active(&mut self, active: bool) {
         self.diagnostics.publication_active = active;

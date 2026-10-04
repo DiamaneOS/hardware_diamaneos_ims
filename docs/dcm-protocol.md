@@ -49,4 +49,7 @@ ordinary client requests must come from the configured remote node. Publication
 checks for an existing service first. If that lookup does not complete within two
 seconds, the daemon publishes anyway: the paired kernel reserves the port and
 service for this role. It keeps the conflict watch active and withdraws its own
-registration on exit. A competing publisher stops the daemon.
+registration on exit. Another publisher on the local node blocks publication
+until a later retry and is counted; existing clients are still served. The
+daemon's own record is not a conflict. Records of the service on other nodes are
+counted and ignored.
