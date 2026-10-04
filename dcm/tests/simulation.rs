@@ -34,6 +34,33 @@ fn network() -> Network {
         mtu: 1500,
     }
 }
+
+#[test]
+fn slotless_service_is_reserved_for_emergency_fallback() {
+    for omit in [false, true] {
+        for emergency in [false, true] {
+            let original = activate(17, 0, 0, emergency, 0);
+            let parsed = Frame::parse(&original).unwrap();
+            let bytes = if omit {
+                let mut encoded = Encoder::new(Kind::Request, 17, ACTIVATE);
+                encoded.tlv(1, parsed.required(1).unwrap()).unwrap();
+                encoded.finish()
+            } else {
+                original
+            };
+            let mut engine = Engine::new(MODEM.node, 2).unwrap();
+            engine.broker_connected();
+            let effects = engine.receive(MODEM, &bytes);
+            assert_eq!(engine.session_count(), usize::from(emergency));
+            assert_eq!(
+                effects
+                    .iter()
+                    .any(|effect| matches!(effect, Effect::BringUp(_))),
+                emergency
+            );
+        }
+    }
+}
 fn request(effects: &[Effect]) -> Request {
     effects
         .iter()
@@ -86,7 +113,7 @@ fn golden_activate_response() {
         panic!()
     };
     assert_eq!(
-        b,
+        &b[..],
         &[
             2, 0x34, 0x12, 0x20, 0, 18, 0, 2, 4, 0, 0, 0, 0, 0, 0x10, 1, 0, 20, 0x11, 4, 0, 9, 0,
             0, 0
@@ -124,11 +151,11 @@ fn dual_family_shares_network_and_releases_last_reference() {
     assert!(!e
         .receive(MODEM, &deactivate(pdp(&a)))
         .iter()
-        .any(|e| matches!(e, Effect::Release(_))));
+        .any(|e| matches!(e, Effect::Release(_) | Effect::ReleaseAfter { .. })));
     assert!(e
         .receive(MODEM, &deactivate(pdp(&b)))
         .iter()
-        .any(|e| matches!(e, Effect::Release(_))));
+        .any(|e| matches!(e, Effect::Release(_) | Effect::ReleaseAfter { .. })));
 }
 #[test]
 fn deactivation_completes_the_original_context_before_replacement() {
@@ -173,7 +200,9 @@ fn deactivation_completes_the_original_context_before_replacement() {
     );
     assert_eq!(response.tlv(0x10), Some([250].as_slice()));
     assert_eq!(response.tlv(0x11), Some(7u32.to_le_bytes().as_slice()));
-    assert!(matches!(out[1], Effect::Release(r) if r == old_request));
+    assert!(
+        matches!(out[1], Effect::ReleaseAfter { peer, request } if peer == MODEM && request == old_request)
+    );
     let Effect::Send(to, terminal) = &out[2] else {
         panic!()
     };
@@ -213,7 +242,9 @@ fn deactivation_notification_is_owner_scoped_and_preserves_shared_bearer() {
     assert_eq!(e.report(request(&first), Some(network())).len(), 2);
     let out = e.receive(MODEM, &deactivate(id));
     assert_eq!(out.len(), 2); // Response, terminal result; shared bearer remains requested.
-    assert!(!out.iter().any(|x| matches!(x, Effect::Release(_))));
+    assert!(!out
+        .iter()
+        .any(|x| matches!(x, Effect::Release(_) | Effect::ReleaseAfter { .. })));
     assert_eq!(e.session_count(), 1);
     let up = e.report(request(&first), Some(network()));
     assert!(up.is_empty()); // Survivor keeps its existing address; no redundant UP notice.
@@ -412,7 +443,9 @@ fn instance_destroy_is_client_scoped_and_releases_the_broker() {
     let packet = f.finish();
     let out = e.receive(MODEM, &packet);
     assert_eq!(e.session_count(), 1);
-    assert!(out.iter().any(|e| matches!(e, Effect::Release(_))));
+    assert!(out
+        .iter()
+        .any(|e| matches!(e, Effect::Release(_) | Effect::ReleaseAfter { .. })));
     let diagnostics = e.diagnostics();
     assert_eq!(
         diagnostics.modem_instance_destructions_by_slot,

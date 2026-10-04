@@ -22,6 +22,7 @@ enum Step {
     RegisterNotifications,
     Clear,
     ClearProfile,
+    AwaitObservation,
     Switch,
     Status,
     Profile,
@@ -49,6 +50,7 @@ pub struct Session {
     step: Step,
     pending: Option<Pending>,
     desired: Observation,
+    has_observation: bool,
     sending: Option<Observation>,
     confirmed: Option<Observation>,
     // Administrative state is independent of connection/metadata settlement.
@@ -88,6 +90,7 @@ impl Session {
                 enabled: false,
                 network: None,
             },
+            has_observation: false,
             sending: None,
             confirmed: None,
             acknowledged_switch: None,
@@ -98,12 +101,15 @@ impl Session {
     }
 
     pub fn observe(&mut self, mut observation: Observation) {
+        self.has_observation = true;
         if !observation.enabled {
             observation.network = None;
         }
         // Only one desired snapshot is retained. No unbounded event history.
         self.desired = observation;
-        if self.step == Step::Idle && self.confirmed.as_ref() != Some(&self.desired) {
+        if (self.step == Step::Idle && self.confirmed.as_ref() != Some(&self.desired))
+            || self.step == Step::AwaitObservation
+        {
             self.step = self.update_start();
         }
     }
@@ -147,6 +153,7 @@ impl Session {
             Step::RegisterNotifications => 8,
             Step::Clear => 1,
             Step::ClearProfile | Step::Profile | Step::WithdrawProfile => 7,
+            Step::AwaitObservation => 9,
             Step::Switch | Step::WithdrawSwitch => 2,
             Step::Status | Step::WithdrawStatus => 3,
             Step::Idle if self.confirmed.as_ref().is_some_and(|s| s.network.is_some()) => 5,
@@ -243,7 +250,10 @@ impl Session {
             pending.deadline = now_ms.saturating_add(DEADLINE_MS);
             return Some(pending.packet.clone());
         }
-        if matches!(self.step, Step::Idle | Step::Failed) {
+        if matches!(
+            self.step,
+            Step::Idle | Step::Failed | Step::AwaitObservation
+        ) {
             return None;
         }
         if self.step == Step::WithdrawProfile && self.desired.network.is_some() {
@@ -381,6 +391,7 @@ impl Session {
             Step::Bind => Step::RegisterNotifications,
             Step::RegisterNotifications => Step::Clear,
             Step::Clear => Step::ClearProfile,
+            Step::ClearProfile if !self.has_observation => Step::AwaitObservation,
             Step::ClearProfile => self.update_start(),
             // Stock's runtime callback reports the current default profile
             // before STA on both positive and negative paths. Availability is

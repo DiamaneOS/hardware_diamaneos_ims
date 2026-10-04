@@ -41,6 +41,7 @@ public final class ObserverApp extends Application {
     private WifiManager wifi;
     private IReporter reporter;
     private IBinder binder;
+    private IBinder.DeathRecipient death;
     private IBinder lifetime;
     private long generation;
     private long sequence;
@@ -170,6 +171,16 @@ public final class ObserverApp extends Application {
             lastStatus = category;
         }
     }
+    private void disconnectReporter() {
+        if (binder != null && death != null) {
+            try {
+                binder.unlinkToDeath(death, 0);
+            } catch (java.util.NoSuchElementException ignored) {
+                // Registration raced with process death; no recipient remains.
+            }
+        }
+        reporter = null; binder = null; lifetime = null; death = null;
+    }
     private void publish() {
         final Snapshot snapshot;
         try {
@@ -185,17 +196,19 @@ public final class ObserverApp extends Application {
                 IReporter next = IReporter.Stub.asInterface(found);
                 IBinder token = new Binder();
                 long epoch = next.registerObserver(token);
-                found.linkToDeath(() -> handler.post(() -> {
+                IBinder.DeathRecipient nextDeath = () -> handler.post(() -> {
                     if (binder == found) {
-                        reporter = null; binder = null; lifetime = null;
+                        disconnectReporter();
                         handler.removeCallbacks(heartbeat);
                         handler.post(heartbeat);
                     }
-                }), 0);
+                });
+                found.linkToDeath(nextDeath, 0);
                 binder = found; reporter = next; lifetime = token; generation = epoch; sequence = 0;
+                death = nextDeath;
                 lastStatus = null;
             }
-            if (sequence == Long.MAX_VALUE) { reporter = null; return; }
+            if (sequence == Long.MAX_VALUE) { disconnectReporter(); return; }
             reporter.observe(generation, ++sequence, snapshot);
             if (DEBUG) {
                 try {
@@ -225,7 +238,7 @@ public final class ObserverApp extends Application {
         } catch (RemoteException | RuntimeException ignored) {
             // No payload/exception logging. Failure cannot refresh the observation
             // lease; the reporter expires it and withdraws availability.
-            reporter = null; binder = null; lifetime = null;
+            disconnectReporter();
             unavailable("Observer delivery unavailable");
         }
     }

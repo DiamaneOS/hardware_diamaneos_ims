@@ -4,7 +4,7 @@ service diamaneos.wlanreport /system_ext/bin/wlanreportd ${ro.vendor.diamaneos.i
     user vendor_wlanreport
     group vendor_wlanreport
     capabilities
-    restart_period 30
+    # Use Android init's ordinary restart floor; protocol retries remain bounded.
     disabled
 
 on property:ro.persistent_properties.ready=true

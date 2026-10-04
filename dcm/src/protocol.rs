@@ -158,6 +158,11 @@ impl Activation {
             Some(s) if s <= slots => (s - 1) as i32,
             _ => return Err(Error::Value),
         };
+        // Only emergency service may use the stock no-subscription fallback.
+        // Reject unsupported slotless IMS before allocating daemon state.
+        if slot < 0 && pdn_type != PdnType::Emergency {
+            return Err(Error::Value);
+        }
         Ok(Self {
             apn: apn.iter().map(u8::to_ascii_lowercase).collect(),
             pdn_type,
