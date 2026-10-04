@@ -6,3 +6,9 @@ pub mod clock;
 pub mod seccomp;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub mod socket;
+
+/// Engine-fenced submission ownership; Android adapter integrates it explicitly.
+pub mod outbox;
+
+/// Classified QRTR transport outcomes; unknown errors remain fail-closed.
+pub mod transport;

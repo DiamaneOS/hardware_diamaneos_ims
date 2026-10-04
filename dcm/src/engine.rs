@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The DiamaneOS Project
 //! Single-owner state machine. Adapters execute effects in order. No I/O or timers.
+use crate::outgoing::{
+    self, Disposition, Fence, Packet, PeerLife, Retained, SidLife, SidStamp, UpSnapshot,
+};
 use crate::protocol::{self as p, Activation, Family, Frame, Kind, PdnType};
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -62,9 +65,15 @@ impl Network {
     }
 }
 pub enum Effect {
-    Send(Peer, Vec<u8>),
+    Send(Peer, Packet),
     BringUp(Request),
     Release(Request),
+    /// The peer's accepted deactivate reply precedes broker teardown; the
+    /// adapter queues this barrier between that reply and the terminal result.
+    ReleaseAfter {
+        peer: Peer,
+        request: Request,
+    },
     ReadTime {
         peer: Peer,
         txn: u16,
@@ -77,6 +86,8 @@ struct Session {
     id: u8,
     activation: Activation,
     address: Option<IpAddr>,
+    submitted_address: Option<IpAddr>,
+    last_network: Option<Network>,
 }
 struct Group {
     request: Request,
@@ -107,6 +118,8 @@ pub struct Diagnostics {
     pub broker_losses: u64,
     pub client_losses: u64,
     pub modem_losses: u64,
+    pub publisher_conflicts: u64,
+    pub publication_active: bool,
 }
 /// Device configuration fixes the modem node and number of slots; no first-packet trust.
 pub struct Engine {
@@ -117,7 +130,9 @@ pub struct Engine {
     serial: i32,
     sessions: Vec<Session>,
     groups: BTreeMap<Key, Group>,
-    indications: BTreeMap<Peer, u16>,
+    indications: BTreeMap<Peer, PeerLife>,
+    sid_life: [SidLife; MAX_SESSIONS],
+    next_peer_epoch: u64,
     diagnostics: Diagnostics,
 }
 impl Engine {
@@ -134,8 +149,17 @@ impl Engine {
             sessions: vec![],
             groups: BTreeMap::new(),
             indications: BTreeMap::new(),
+            sid_life: [SidLife::default(); MAX_SESSIONS],
+            next_peer_epoch: 1,
             diagnostics: Diagnostics::default(),
         })
+    }
+    pub fn publisher_conflict(&mut self) {
+        self.diagnostics.publisher_conflicts =
+            self.diagnostics.publisher_conflicts.saturating_add(1);
+    }
+    pub fn publication_active(&mut self, active: bool) {
+        self.diagnostics.publication_active = active;
     }
     pub fn session_count(&self) -> usize {
         self.sessions.len()
@@ -156,13 +180,166 @@ impl Engine {
         Some(self.serial)
     }
     fn sequence(&mut self, peer: Peer) -> u16 {
-        let s = self.indications.entry(peer).or_insert(0);
-        *s = s.wrapping_add(1);
-        if *s == 0 {
-            *s = 1;
-        }
-        *s
+        let state = self
+            .indications
+            .get_mut(&peer)
+            .expect("admitted modem peer");
+        state.sequence = state.sequence.wrapping_add(1);
+        state.sequence
     }
+    fn sid_index(id: u8) -> Option<usize> {
+        (FIRST_SESSION_ID..=LAST_SESSION_ID)
+            .contains(&id)
+            .then_some(usize::from(id.saturating_sub(FIRST_SESSION_ID)))
+    }
+    fn stamp(&self, id: u8) -> SidStamp {
+        SidStamp {
+            id,
+            incarnation: self.sid_life[Self::sid_index(id).expect("owned SID")].incarnation,
+        }
+    }
+    fn reply(&self, peer: Peer, bytes: Vec<u8>, id: Option<u8>) -> Effect {
+        Effect::Send(
+            peer,
+            Packet::reply(
+                bytes,
+                id.map(|id| self.stamp(id)),
+                !self.peer_is_tracked(peer),
+            ),
+        )
+    }
+    /// A typed read-only calendar completion for the already validated request.
+    pub fn calendar_reply(
+        &self,
+        peer: Peer,
+        transaction: u16,
+        pdp: u8,
+        sequence: u32,
+        sample: Option<([u16; 8], u64)>,
+    ) -> Effect {
+        let bytes = sample
+            .and_then(|(fields, seconds)| {
+                p::timezone_response(transaction, pdp, sequence, fields, seconds).ok()
+            })
+            .unwrap_or_else(|| p::response(transaction, 0x32, 1, 0));
+        self.reply(peer, bytes, None)
+    }
+    /// The caller must retain/submit/discard returned effects before another
+    /// engine transition, so retired IDs can be pinned before reuse.
+    pub fn retain_output(&mut self, peer: Peer, packet: Packet) -> Option<Retained> {
+        // One-shot replies to unadmitted peers have no reusable lifetime and
+        // must be submitted immediately, never deferred across peer changes.
+        let peer_epoch = self.indications.get(&peer)?.epoch;
+        let stamp = match &packet.fence {
+            Fence::Reply(sid) => *sid,
+            Fence::Up(snapshot) => Some(snapshot.sid),
+            Fence::Terminal(sid) => Some(*sid),
+        };
+        if let Some(stamp) = stamp {
+            let life = &mut self.sid_life[Self::sid_index(stamp.id)?];
+            if life.incarnation != stamp.incarnation || life.owner != Some(peer) {
+                return None;
+            }
+            life.pins = life.pins.checked_add(1)?;
+        }
+        Some(Retained {
+            peer,
+            peer_epoch: Some(peer_epoch),
+            packet,
+            pinned: stamp,
+        })
+    }
+    pub fn peer_is_tracked(&self, peer: Peer) -> bool {
+        self.indications.contains_key(&peer)
+    }
+    pub fn request_is_current(&self, request: Request) -> bool {
+        self.broker
+            && self
+                .groups
+                .get(&request.key)
+                .is_some_and(|group| group.request == request)
+    }
+    pub fn prepare_output(&self, output: &Retained) -> Option<Vec<u8>> {
+        if self.indications.get(&output.peer).map(|p| p.epoch) != output.peer_epoch {
+            return None;
+        }
+        if let Some(stamp) = output.pinned {
+            let life = self.sid_life[Self::sid_index(stamp.id)?];
+            if life.incarnation != stamp.incarnation || life.owner != Some(output.peer) {
+                return None;
+            }
+        }
+        match &output.packet.fence {
+            Fence::Reply(_) => Some(output.packet.bytes.clone()),
+            Fence::Terminal(stamp) => (!self.sessions.iter().any(|s| s.id == stamp.id))
+                .then(|| output.packet.bytes.clone()),
+            Fence::Up(UpSnapshot {
+                sid,
+                request,
+                address,
+                network,
+                cookie,
+                sequence,
+                force_initial,
+            }) => {
+                let session = self
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == sid.id && s.peer == output.peer)?;
+                let group = self.groups.get(&Self::group_key(&session.activation))?;
+                if group.request != *request
+                    || group.network.as_ref() != Some(network)
+                    || session.activation.cookie != *cookie
+                    || session.address != Some(*address)
+                    || group.network.as_ref()?.address(session.activation.family) != Some(*address)
+                {
+                    return None;
+                }
+                Some(outgoing::up_wire(
+                    *sequence,
+                    sid.id,
+                    &session.activation,
+                    *address,
+                    !*force_initial && session.submitted_address.is_some(),
+                ))
+            }
+        }
+    }
+    pub fn finish_output(&mut self, output: Retained, result: Disposition) {
+        if matches!(result, Disposition::Submitted) && self.prepare_output(&output).is_some() {
+            if let Fence::Up(UpSnapshot { sid, address, .. }) = output.packet.fence {
+                if self.prepare_output_ref(&output.peer, sid, address) {
+                    if let Some(session) = self
+                        .sessions
+                        .iter_mut()
+                        .find(|s| s.id == sid.id && s.peer == output.peer)
+                    {
+                        session.submitted_address = Some(address);
+                    }
+                }
+            }
+        }
+        if let Some(stamp) = output.pinned {
+            if let Some(index) = Self::sid_index(stamp.id) {
+                let life = &mut self.sid_life[index];
+                if life.incarnation == stamp.incarnation && life.owner == Some(output.peer) {
+                    life.pins = life
+                        .pins
+                        .checked_sub(1)
+                        .expect("one retained-output finish");
+                }
+            }
+        }
+    }
+    fn prepare_output_ref(&self, peer: &Peer, sid: SidStamp, address: IpAddr) -> bool {
+        Self::sid_index(sid.id)
+            .is_some_and(|index| self.sid_life[index].incarnation == sid.incarnation)
+            && self
+                .sessions
+                .iter()
+                .any(|s| s.id == sid.id && s.peer == *peer && s.address == Some(address))
+    }
+
     fn group_key(a: &Activation) -> Key {
         Key {
             slot: a.slot,
@@ -186,6 +363,8 @@ impl Engine {
         }
         for s in &mut self.sessions {
             s.address = None;
+            s.submitted_address = None;
+            s.last_network = None;
         }
         out
     }
@@ -258,7 +437,10 @@ impl Engine {
             let seq = self.sequence(s.peer);
             out.push(Effect::Send(
                 s.peer,
-                p::indication(seq, s.id, &s.activation, None, false),
+                Packet::terminal(
+                    p::indication(seq, s.id, &s.activation, None, false),
+                    self.stamp(s.id),
+                ),
             ));
         }
         out.extend(self.release_unused());
@@ -291,7 +473,10 @@ impl Engine {
             let i = self.sessions.iter().position(|s| s.id == id).unwrap();
             let s = &self.sessions[i];
             let address = network.address(s.activation.family);
-            if address.is_some() && address == s.address {
+            if address.is_some()
+                && address == s.address
+                && s.last_network.as_ref() == Some(&network)
+            {
                 continue;
             }
             let peer = s.peer;
@@ -300,10 +485,27 @@ impl Engine {
             let seq = self.sequence(peer);
             out.push(Effect::Send(
                 peer,
-                p::indication(seq, id, &a, address, change),
+                match address {
+                    Some(address) => Packet::up(
+                        p::indication(seq, id, &a, Some(address), change),
+                        UpSnapshot {
+                            sid: self.stamp(id),
+                            request,
+                            address,
+                            network: network.clone(),
+                            cookie: a.cookie,
+                            sequence: seq,
+                            force_initial: false,
+                        },
+                    ),
+                    None => {
+                        Packet::terminal(p::indication(seq, id, &a, None, false), self.stamp(id))
+                    }
+                },
             ));
             if address.is_some() {
                 self.sessions[i].address = address;
+                self.sessions[i].last_network = Some(network.clone());
             } else {
                 let slot = (a.slot + 1) as usize;
                 self.diagnostics.missing_family_releases_by_slot[slot] =
@@ -324,7 +526,7 @@ impl Engine {
             Err(_) => {
                 self.diagnostics.malformed = self.diagnostics.malformed.saturating_add(1);
                 if bytes.len() >= 7 && bytes.len() <= p::MAX_DATAGRAM && bytes[0] == 0 {
-                    return vec![Effect::Send(
+                    return vec![self.reply(
                         peer,
                         p::response(
                             u16::from_le_bytes([bytes[1], bytes[2]]),
@@ -332,6 +534,7 @@ impl Engine {
                             1,
                             0x3a,
                         ),
+                        None,
                     )];
                 }
                 return vec![];
@@ -342,10 +545,7 @@ impl Engine {
         }
         if p::validate_request(&frame).is_err() {
             self.diagnostics.malformed = self.diagnostics.malformed.saturating_add(1);
-            return vec![Effect::Send(
-                peer,
-                p::response(frame.txn, frame.id, 1, 0x3a),
-            )];
+            return vec![self.reply(peer, p::response(frame.txn, frame.id, 1, 0x3a), None)];
         }
         self.diagnostics.requests = self.diagnostics.requests.saturating_add(1);
         self.diagnostics.last_request = frame.id;
@@ -354,7 +554,7 @@ impl Engine {
             p::DEACTIVATE => self.deactivate(peer, &frame),
             0x22 => vec![], // Observed stock GET_IP_ADDRESS handler sends no reply.
             // These handlers are enabled only with their validated, bounded fields.
-            0x23 => vec![Effect::Send(peer, p::response(frame.txn, frame.id, 0, 0))],
+            0x23 => vec![self.reply(peer, p::response(frame.txn, frame.id, 0, 0), None)],
             0x33 => {
                 // Width/mandatory validation above; scope destruction to this client.
                 let instance = p::u32_value(frame.required(1).unwrap()).unwrap();
@@ -367,7 +567,7 @@ impl Engine {
                     }
                     !remove
                 });
-                let mut out = vec![Effect::Send(peer, p::response(frame.txn, frame.id, 0, 0))];
+                let mut out = vec![self.reply(peer, p::response(frame.txn, frame.id, 0, 0), None)];
                 out.extend(self.release_unused());
                 out
             }
@@ -377,24 +577,22 @@ impl Engine {
                 pdp: p::u8_value(frame.required(1).unwrap()).unwrap(),
                 sequence: p::u32_value(frame.required(2).unwrap()).unwrap(),
             }],
-            0x2e | 0x34 => vec![Effect::Send(peer, p::response(frame.txn, frame.id, 0, 0))],
+            0x2e | 0x34 => vec![self.reply(peer, p::response(frame.txn, frame.id, 0, 0), None)],
             // Undecoded commands never report successful execution.
             0x25..=0x2a | 0x2c | 0x2d | 0x31 => {
-                vec![Effect::Send(peer, p::response(frame.txn, frame.id, 1, 0))]
+                vec![self.reply(peer, p::response(frame.txn, frame.id, 1, 0), None)]
             }
-            _ => vec![Effect::Send(
-                peer,
-                p::response(frame.txn, frame.id, 1, 0x3a),
-            )],
+            _ => vec![self.reply(peer, p::response(frame.txn, frame.id, 1, 0x3a), None)],
         }
     }
     fn activate(&mut self, peer: Peer, f: &Frame<'_>) -> Vec<Effect> {
         let a = match Activation::decode(f, self.slots) {
             Ok(a) => a,
             Err(e) => {
-                return vec![Effect::Send(
+                return vec![self.reply(
                     peer,
                     p::response(f.txn, f.id, 1, if e == p::Error::Value { 0 } else { 0x3a }),
+                    None,
                 )]
             }
         };
@@ -402,10 +600,10 @@ impl Engine {
         self.diagnostics.activation_requests_by_slot[slot] =
             self.diagnostics.activation_requests_by_slot[slot].saturating_add(1);
         if a.pdn_type == PdnType::Emergency && !self.emergency_enabled {
-            return vec![Effect::Send(peer, p::response(f.txn, f.id, 1, 0))];
+            return vec![self.reply(peer, p::response(f.txn, f.id, 1, 0), None)];
         }
         if !self.indications.contains_key(&peer) && self.indications.len() >= MAX_CLIENTS {
-            return vec![Effect::Send(peer, p::response(f.txn, f.id, 1, 5))];
+            return vec![self.reply(peer, p::response(f.txn, f.id, 1, 5), None)];
         }
         if let Some(i) = self
             .sessions
@@ -415,12 +613,26 @@ impl Engine {
             let id = self.sessions[i].id;
             let address = self.sessions[i].address;
             self.sessions[i].activation.cookie = a.cookie;
-            let mut out = vec![Effect::Send(peer, p::activation_response(f.txn, id, &a))];
+            let mut out = vec![self.reply(peer, p::activation_response(f.txn, id, &a), Some(id))];
             if let Some(ip) = address {
                 let seq = self.sequence(peer);
                 out.push(Effect::Send(
                     peer,
-                    p::indication(seq, id, &a, Some(ip), false),
+                    Packet::up(
+                        p::indication(seq, id, &a, Some(ip), false),
+                        UpSnapshot {
+                            sid: self.stamp(id),
+                            request: self.groups[&Self::group_key(&a)].request,
+                            address: ip,
+                            network: self.groups[&Self::group_key(&a)]
+                                .network
+                                .clone()
+                                .expect("current address network"),
+                            cookie: a.cookie,
+                            sequence: seq,
+                            force_initial: true,
+                        },
+                    ),
                 ));
             }
             return out;
@@ -433,19 +645,37 @@ impl Engine {
         if self.sessions.len() >= MAX_SESSIONS
             || (a.pdn_type == PdnType::Ims && normal >= MAX_SESSIONS - EMERGENCY_RESERVE)
         {
-            return vec![Effect::Send(peer, p::response(f.txn, f.id, 1, 5))];
+            return vec![self.reply(peer, p::response(f.txn, f.id, 1, 5), None)];
         }
-        let Some(id) = (FIRST_SESSION_ID..=LAST_SESSION_ID)
-            .find(|id| !self.sessions.iter().any(|s| s.id == *id))
-        else {
-            return vec![Effect::Send(peer, p::response(f.txn, f.id, 1, 5))];
+        let Some(id) = (FIRST_SESSION_ID..=LAST_SESSION_ID).find(|id| {
+            !self.sessions.iter().any(|s| s.id == *id)
+                && self.sid_life[Self::sid_index(*id).expect("bounded SID")].pins == 0
+        }) else {
+            return vec![self.reply(peer, p::response(f.txn, f.id, 1, 5), None)];
         };
+        let index = Self::sid_index(id).expect("allocated SID");
+        let Some(incarnation) = self.sid_life[index].incarnation.checked_add(1) else {
+            return vec![self.reply(peer, p::response(f.txn, f.id, 1, 5), None)];
+        };
+        self.sid_life[index] = SidLife {
+            incarnation,
+            owner: Some(peer),
+            pins: 0,
+        };
+        if !self.indications.contains_key(&peer) {
+            let epoch = self.next_peer_epoch;
+            let Some(next) = epoch.checked_add(1) else {
+                return vec![self.reply(peer, p::response(f.txn, f.id, 1, 5), None)];
+            };
+            self.next_peer_epoch = next;
+            self.indications
+                .insert(peer, PeerLife { sequence: 0, epoch });
+        }
         let key = Self::group_key(&a);
-        let mut out = vec![Effect::Send(peer, p::activation_response(f.txn, id, &a))];
-        self.indications.entry(peer).or_insert(0);
+        let mut out = vec![self.reply(peer, p::activation_response(f.txn, id, &a), Some(id))];
         if !self.groups.contains_key(&key) {
             let Some(serial) = self.next_serial() else {
-                return vec![Effect::Send(peer, p::response(f.txn, f.id, 1, 5))];
+                return vec![self.reply(peer, p::response(f.txn, f.id, 1, 5), None)];
             };
             let request = Request { key, serial };
             self.groups.insert(
@@ -464,6 +694,8 @@ impl Engine {
             id,
             activation: a,
             address: None,
+            submitted_address: None,
+            last_network: None,
         });
         if let Some(network) = self.groups[&key].network.clone() {
             out.extend(self.report(self.groups[&key].request, Some(network)));
@@ -477,7 +709,7 @@ impl Engine {
             .and_then(|id| f.optional_u32(0x10).map(|instance| (id, instance)));
         let (id, instance) = match decoded {
             Ok(v) => v,
-            Err(_) => return vec![Effect::Send(peer, p::response(f.txn, f.id, 1, 0x3a))],
+            Err(_) => return vec![self.reply(peer, p::response(f.txn, f.id, 1, 0x3a), None)],
         };
         let found = self.sessions.iter().position(|s| {
             s.peer == peer
@@ -497,13 +729,20 @@ impl Engine {
         if let Some(v) = instance {
             let _ = e.tlv(0x11, &v.to_le_bytes());
         }
-        let mut out = vec![Effect::Send(peer, e.finish())];
+        let mut out = vec![self.reply(peer, e.finish(), found.map(|i| self.sessions[i].id))];
         if let Some(i) = found {
             let slot = (self.sessions[i].activation.slot + 1) as usize;
             self.diagnostics.modem_releases_by_slot[slot] =
                 self.diagnostics.modem_releases_by_slot[slot].saturating_add(1);
             let session = self.sessions.remove(i);
-            out.extend(self.release_unused());
+            out.extend(
+                self.release_unused()
+                    .into_iter()
+                    .map(|effect| match effect {
+                        Effect::Release(request) => Effect::ReleaseAfter { peer, request },
+                        other => other,
+                    }),
+            );
             // The deactivate response acknowledges the request; the modem also
             // expects a terminal PDP indication for the original context. Stock
             // emits this after its data-service teardown, before a replacement
@@ -512,7 +751,10 @@ impl Engine {
             let seq = self.sequence(peer);
             out.push(Effect::Send(
                 peer,
-                p::indication(seq, session.id, &session.activation, None, false),
+                Packet::terminal(
+                    p::indication(seq, session.id, &session.activation, None, false),
+                    self.stamp(session.id),
+                ),
             ));
         }
         out

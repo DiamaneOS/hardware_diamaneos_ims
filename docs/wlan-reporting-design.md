@@ -166,7 +166,8 @@ seccomp filter is not widened for logging; init routes its standard error to
 
 Stages are -1 (no endpoint/observation yet), 0 (bind), 1 (startup clear), 2 (switch),
 3 (STA status), 4 (acknowledged unavailable), 5 (acknowledged available), 6 (failed),
-7 (default connectivity profile), and 8 (notification registration). Settled
+7 (default connectivity profile), 8 (notification registration), and
+9 (startup clears acknowledged; awaiting an authenticated observation). Settled
 states require both connectivity acknowledgements.
 Operation is the pending or failed message ID. Error0 means no recorded failure,
 positive values are QMI errors, -1 is timeout, -2 transaction exhaustion, and -3
@@ -199,3 +200,10 @@ it does not exercise this graceful handler. Forced termination or an unavailable
 withdrawal. None of these timers fabricates connectivity or bypasses protocol
 acknowledgements. Keep observer heartbeat and lease values coherent when changing
 this scheduling policy; exact recovery remains a native qualification gate.
+
+Startup reconciliation runs independently of observer delivery: discover/bind,
+register notifications, clear station availability and default profile0, then
+wait. Unknown Wi-Fi administrative state is preserved. No switch value or
+positive connectivity is sent until an authenticated observation arrives.
+The ordinary init restart floor and protocol renewal limits are separate; neither
+is a carrier registration guarantee.

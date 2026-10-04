@@ -5,3 +5,6 @@ pub mod engine;
 pub mod protocol;
 
 pub mod qrtr;
+
+/// Deferred-output ownership tokens; only Engine can create their fences.
+pub mod outgoing;

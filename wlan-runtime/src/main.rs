@@ -13,7 +13,11 @@ use diamaneos_ims_dcm::{
     engine::Peer,
     qrtr::{Control, BYE, CTRL_PORT, DEL_SERVER, NEW_LOOKUP, NEW_SERVER},
 };
-use diamaneos_ims_runtime::{seccomp, socket::Qrtr};
+use diamaneos_ims_runtime::{
+    seccomp,
+    socket::Qrtr,
+    transport::{classify, Fault},
+};
 use diamaneos_wlan_reporting::{
     session::{Observation, Session},
     Connected, DSD_SERVICE,
@@ -184,6 +188,7 @@ struct Client {
     retry_at: u64,
     failures: u8,
     last_observation: Option<Observation>,
+    lookup_pending: bool,
 }
 impl Client {
     fn new(subscription: u32, node: u32) -> io::Result<Self> {
@@ -191,17 +196,6 @@ impl Client {
         if socket.local().node == node {
             return Err(io::Error::other("local modem node"));
         }
-        socket.send(
-            Peer {
-                node: socket.local().node,
-                port: CTRL_PORT,
-            },
-            &Control {
-                command: NEW_LOOKUP,
-                words: [DSD_SERVICE, 1, 0, 0],
-            }
-            .encode(),
-        )?;
         Ok(Self {
             socket,
             endpoint: None,
@@ -218,6 +212,7 @@ impl Client {
             retry_at: 0,
             failures: 0,
             last_observation: None,
+            lookup_pending: true,
         })
     }
 
@@ -226,10 +221,10 @@ impl Client {
         *self = next;
         Ok(())
     }
-    fn step(&mut self, node: u32, observation: &Observation, now: u64) -> io::Result<()> {
-        if self.last_observation.as_ref() != Some(observation) {
+    fn step(&mut self, node: u32, observation: Option<&Observation>, now: u64) -> io::Result<()> {
+        if self.last_observation.as_ref() != observation {
             self.failures = 0;
-            self.last_observation = Some(observation.clone());
+            self.last_observation = observation.cloned();
         }
         if self.state.failed() {
             if self.retry_at == 0 {
@@ -239,14 +234,49 @@ impl Client {
                 let failures = self.failures + 1;
                 self.reconnect(node)?;
                 self.failures = failures;
-                self.last_observation = Some(observation.clone());
+                self.last_observation = observation.cloned();
             }
         }
-        self.state.observe(observation.clone());
+        if let Some(observation) = observation {
+            self.state.observe(observation.clone());
+        }
+        if self.lookup_pending {
+            let lookup = Control {
+                command: NEW_LOOKUP,
+                words: [DSD_SERVICE, 1, 0, 0],
+            }
+            .encode();
+            match self.socket.send(
+                Peer {
+                    node: self.socket.local().node,
+                    port: CTRL_PORT,
+                },
+                &lookup,
+            ) {
+                Ok(()) => self.lookup_pending = false,
+                Err(error) => match classify(&error) {
+                    Fault::Retry => return Ok(()),
+                    Fault::PeerGone | Fault::SocketReset => {
+                        self.reconnect(node)?;
+                        return Ok(());
+                    }
+                    Fault::Unexpected => return Err(error),
+                },
+            }
+        }
         // Bound input work so indication floods cannot starve expiry or the other SIM.
         for _ in 0..MAX_RECEIVED_PACKETS_PER_CYCLE {
-            let Some((peer, bytes)) = self.socket.receive(Duration::ZERO)? else {
-                break;
+            let (peer, bytes) = match self.socket.receive(Duration::ZERO) {
+                Ok(Some(packet)) => packet,
+                Ok(None) => break,
+                Err(error) => match classify(&error) {
+                    Fault::Retry => break,
+                    Fault::PeerGone | Fault::SocketReset => {
+                        self.reconnect(node)?;
+                        return Ok(());
+                    }
+                    Fault::Unexpected => return Err(error),
+                },
             };
             if peer
                 == (Peer {
@@ -291,7 +321,19 @@ impl Client {
         }
         if let Some(peer) = self.endpoint {
             for packet in self.state.poll_cycle(now).into_iter().flatten() {
-                self.socket.send(peer, &packet)?;
+                match self.socket.send(peer, &packet) {
+                    Ok(()) => (),
+                    Err(error) => match classify(&error) {
+                        // Session already owns this pending packet/token. Do not
+                        // enqueue a second copy or reset the other subscription.
+                        Fault::Retry => break,
+                        Fault::PeerGone | Fault::SocketReset => {
+                            self.reconnect(node)?;
+                            break;
+                        }
+                        Fault::Unexpected => return Err(error),
+                    },
+                }
             }
         }
         Ok(())
@@ -354,11 +396,11 @@ fn run() -> io::Result<()> {
             .map_err(|_| io::Error::other("observer state"))?
             .observations
             .current(now);
-        // No guessed Wi-Fi switch state before the first authenticated observation.
-        if let Some(observation) = observation {
-            for client in &mut clients {
-                client.step(node, &observation, now)?;
-            }
+        // Reconcile startup modem state even before an observer is available.
+        // Session waits after clears; only authenticated observations can send
+        // switch state or replay positive connectivity.
+        for client in &mut clients {
+            client.step(node, observation.as_ref(), now)?;
         }
         let mut s = shared
             .lock()
@@ -402,7 +444,7 @@ fn run() -> io::Result<()> {
         let deadline = elapsed(origin).saturating_add(SHUTDOWN_WITHDRAWAL_BUDGET_MS);
         while elapsed(origin) < deadline {
             for client in &mut clients {
-                client.step(node, &withdrawn, elapsed(origin))?;
+                client.step(node, Some(&withdrawn), elapsed(origin))?;
             }
             if clients.iter().all(|c| c.state.settled()) {
                 break;

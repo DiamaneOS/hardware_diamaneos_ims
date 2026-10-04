@@ -1,14 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The DiamaneOS Project
-# Platform-side lifecycle gate for the vendor daemon. init can observe the
-# platform-private persistence-ready property; vendor_init cannot. This does
-# not give the daemon or broker access to any additional property or service.
-# Start after persistent properties are loaded (before the first unlock on
-# FBE), so a set kill switch is seen before the DCM service is ever published.
-# The build sets persist.vendor.diamaneos.ims.dcm_kill=0 as the default; an
-# absent value leaves the daemon stopped.
-on property:ro.persistent_properties.ready=true && property:persist.vendor.diamaneos.ims.dcm_kill=0
+# Platform lifecycle gate. Ordinary/user builds always start the selected service;
+# debug-only nonpersistent kill controls cannot disable a later boot or release.
+on property:ro.persistent_properties.ready=true
     start vendor.imsdcmd
 
-on property:persist.vendor.diamaneos.ims.dcm_kill=1
+on property:ro.debuggable=1 && property:vendor.diamaneos.ims.dcm_kill=1
     stop vendor.imsdcmd
+
+on property:ro.debuggable=1 && property:vendor.diamaneos.ims.dcm_kill=0
+    start vendor.imsdcmd

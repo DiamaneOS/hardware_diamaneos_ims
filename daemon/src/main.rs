@@ -6,11 +6,16 @@ use binder::{
     Strong, ThreadState,
 };
 use diamaneos_ims_dcm::{
-    engine::{Diagnostics, Effect, Engine, Key, Network, Request},
+    engine::{Diagnostics, Engine, Key, Network, Request},
     protocol::PdnType as Kind,
     qrtr::*,
 };
-use diamaneos_ims_runtime::socket::Qrtr;
+use diamaneos_ims_runtime::{
+    socket::{Publication, Qrtr},
+    transport::{classify, Fault},
+};
+mod android_dispatch;
+use android_dispatch::{Broker, Dispatch};
 use std::{
     ffi::CStr,
     io,
@@ -20,7 +25,7 @@ use std::{
         mpsc::{sync_channel, SyncSender, TryRecvError},
         Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use vendor_diamaneos_hardware_imsdcm::aidl::vendor::diamaneos::hardware::imsdcm::{
     IImsDcm::{BnImsDcm, IImsDcm},
@@ -185,51 +190,6 @@ fn request(r: Request) -> PdnRequest {
         serial: r.serial,
     }
 }
-fn effects(
-    socket: &Qrtr,
-    broker: Option<&Strong<dyn IPdnBroker>>,
-    out: Vec<Effect>,
-) -> io::Result<()> {
-    for e in out {
-        match e {
-            Effect::Send(peer, bytes) => socket.send(peer, &bytes)?,
-            Effect::ReadTime {
-                peer,
-                txn,
-                pdp,
-                sequence,
-            } => {
-                let reply = diamaneos_ims_runtime::clock::now()
-                    .ok()
-                    .and_then(|t| {
-                        diamaneos_ims_dcm::protocol::timezone_response(
-                            txn,
-                            pdp,
-                            sequence,
-                            t.fields,
-                            t.utc_seconds,
-                        )
-                        .ok()
-                    })
-                    .unwrap_or_else(|| diamaneos_ims_dcm::protocol::response(txn, 0x32, 1, 0));
-                socket.send(peer, &reply)?;
-            }
-            Effect::BringUp(r) => {
-                if let Some(b) = broker {
-                    b.bringUp(&request(r))
-                        .map_err(|_| io::Error::other("broker unavailable"))?;
-                }
-            }
-            Effect::Release(r) => {
-                if let Some(b) = broker {
-                    b.release(&request(r))
-                        .map_err(|_| io::Error::other("broker unavailable"))?;
-                }
-            }
-        }
-    }
-    Ok(())
-}
 fn run() -> io::Result<()> {
     if unsafe { libc::getuid() } != 2990 {
         return Err(io::Error::other("wrong daemon uid"));
@@ -239,6 +199,11 @@ fn run() -> io::Result<()> {
     if std::fs::read_to_string("/sys/fs/selinux/enforce")?.trim() != "1" {
         return Err(io::Error::other("enforcing SELinux required"));
     }
+    // Validate immutable policy before advertising Binder or QRTR services.
+    if prop("ro.vendor.diamaneos.ims.emergency_pdn").as_deref() != Some("serve") {
+        return Err(io::Error::other("emergency policy must be serve"));
+    }
+    let debug_controls = prop("ro.debuggable").as_deref() == Some("1");
     let node = number("ro.vendor.diamaneos.ims.modem_node")?;
     let slots = number("ro.vendor.diamaneos.ims.slots")?;
     let mut engine = Engine::new(node, slots).map_err(io::Error::other)?;
@@ -264,97 +229,174 @@ fn run() -> io::Result<()> {
     ProcessState::start_thread_pool();
     binder::add_service(SERVICE, service.as_binder())
         .map_err(|_| io::Error::other("binder registration failed"))?;
-    // Read-only build policy. A missing/misspelled policy is a configuration error,
-    // not a silently degraded emergency path.
-    if prop("ro.vendor.diamaneos.ims.emergency_pdn").as_deref() != Some("serve") {
-        return Err(io::Error::other("emergency policy must be serve"));
-    }
-    socket.publish()?;
+    // Initial collision is degradation, not a crash or a publication race.
+    let mut published = match socket.publish() {
+        Ok(Publication::Ready) => true,
+        Ok(Publication::Conflict) => {
+            engine.publisher_conflict();
+            false
+        }
+        Err(error)
+            if classify(&error) == Fault::Retry || error.kind() == io::ErrorKind::TimedOut =>
+        {
+            false
+        }
+        Err(error) => return Err(error),
+    };
+    let origin = Instant::now();
+    const PUBLICATION_RETRY_DELAY_MS: u64 = 30_000;
+    let mut next_publication = PUBLICATION_RETRY_DELAY_MS;
+    let mut dispatch = Dispatch::default();
     // SAFETY: handler only stores an atomic flag; no allocation or I/O in signals.
     unsafe {
         libc::signal(libc::SIGINT, stop as *const () as libc::sighandler_t);
         libc::signal(libc::SIGTERM, stop as *const () as libc::sighandler_t);
         libc::signal(libc::SIGHUP, stop as *const () as libc::sighandler_t);
     }
-    let mut broker: Option<(u64, Strong<dyn IPdnBroker>, DeathRecipient)> = None;
+    let mut broker: Option<Broker> = None;
     let mut latest_registration = 0;
-    while !STOP.load(Ordering::Relaxed) {
-        if overflow.load(Ordering::Acquire) {
-            return Err(io::Error::other("binder queue overflow"));
-        }
-        if prop("persist.vendor.diamaneos.ims.dcm_kill").as_deref() == Some("1") {
-            break;
-        }
-        let enabled =
-            prop("persist.vendor.diamaneos.ims.emergency_pdn_kill").as_deref() != Some("1");
-        effects(
-            &socket,
-            broker.as_ref().map(|b| &b.1),
-            engine.set_emergency_enabled(enabled),
-        )?;
-        // Bound work per iteration so a broker flood cannot starve QRTR or signals.
-        for _ in 0..32 {
-            let e = match rx.try_recv() {
-                Ok(e) => e,
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => {
-                    return Err(io::Error::other("binder disconnected"))
+    let operation = (|| -> io::Result<()> {
+        while !STOP.load(Ordering::Relaxed) {
+            let now = origin.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+            if !published && now >= next_publication {
+                next_publication = now.saturating_add(PUBLICATION_RETRY_DELAY_MS);
+                match socket.publish() {
+                    Ok(Publication::Ready) => published = true,
+                    Ok(Publication::Conflict) => engine.publisher_conflict(),
+                    Err(error)
+                        if classify(&error) == Fault::Retry
+                            || error.kind() == io::ErrorKind::TimedOut =>
+                    {
+                        ()
+                    }
+                    Err(error) => return Err(error),
                 }
+            }
+            if overflow.load(Ordering::Acquire) {
+                return Err(io::Error::other("binder queue overflow"));
+            }
+            if debug_controls && prop("vendor.diamaneos.ims.dcm_kill").as_deref() == Some("1") {
+                break;
+            }
+            let enabled = !debug_controls
+                || prop("vendor.diamaneos.ims.emergency_pdn_kill").as_deref() != Some("1");
+            let out = engine.set_emergency_enabled(enabled);
+            dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
+            // Bound work per iteration so a broker flood cannot starve QRTR or signals.
+            for _ in 0..32 {
+                let e = match rx.try_recv() {
+                    Ok(e) => e,
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        return Err(io::Error::other("binder disconnected"))
+                    }
+                };
+                let out = match e {
+                    Event::Register(epoch, b, d) => {
+                        if epoch <= latest_registration {
+                            continue;
+                        }
+                        latest_registration = epoch;
+                        if broker.is_some() {
+                            let out = engine.broker_lost();
+                            dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
+                        }
+                        broker = Some((epoch, b, d));
+                        engine.broker_connected()
+                    }
+                    Event::Lost(epoch) => {
+                        latest_registration = latest_registration.max(epoch);
+                        if broker.as_ref().is_some_and(|b| b.0 == epoch) {
+                            broker = None;
+                            engine.broker_lost()
+                        } else {
+                            vec![]
+                        }
+                    }
+                    Event::Report(epoch, r, n) => {
+                        if broker.as_ref().is_some_and(|b| b.0 == epoch) {
+                            engine.report(r, n)
+                        } else {
+                            vec![]
+                        }
+                    }
+                };
+                dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
+            }
+            let incoming = match socket.receive(Duration::from_millis(25)) {
+                Ok(packet) => packet,
+                Err(error) => match classify(&error) {
+                    Fault::Retry => None,
+                    Fault::PeerGone | Fault::SocketReset => {
+                        // A socket-wide receive failure has no destination peer.
+                        // Withdraw this modem's state before replacing the socket.
+                        dispatch.purge_all(&mut engine, broker.as_ref())?;
+                        let out = engine.node_gone(node);
+                        dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
+                        socket = Qrtr::bind()?;
+                        published = false;
+                        next_publication = now;
+                        None
+                    }
+                    Fault::Unexpected => return Err(error),
+                },
             };
-            let out = match e {
-                Event::Register(epoch, b, d) => {
-                    if epoch <= latest_registration {
-                        continue;
+            if let Some((peer, bytes)) = incoming {
+                let out = if peer.port == CTRL_PORT && peer.node == socket.local().node {
+                    match Control::decode(&bytes) {
+                        Some(c) if c.conflicts_with(socket.local()) => {
+                            engine.publisher_conflict();
+                            vec![] // Preserve live clients; ownership is a separate kernel gate.
+                        }
+                        Some(c) if c.command == DEL_CLIENT => {
+                            let lost = c.deleted_client().unwrap();
+                            dispatch.purge_peer(&mut engine, broker.as_ref(), lost)?;
+                            engine.peer_gone(lost)
+                        }
+                        Some(c) if c.command == BYE => {
+                            dispatch.purge_node(&mut engine, broker.as_ref(), c.words[0])?;
+                            engine.node_gone(c.words[0])
+                        }
+                        _ => vec![],
                     }
-                    latest_registration = epoch;
-                    if let Some((_, old, _)) = &broker {
-                        effects(&socket, Some(old), engine.broker_lost())?;
-                    }
-                    broker = Some((epoch, b, d));
-                    engine.broker_connected()
+                } else {
+                    engine.receive(peer, &bytes)
+                };
+                dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
+            }
+            // Revoke the failed broker's positive outputs before attempting a send.
+            if let Some(epoch) = dispatch.broker_lost.take() {
+                if broker.as_ref().is_some_and(|current| current.0 == epoch) {
+                    broker = None;
+                    let out = engine.broker_lost();
+                    dispatch.apply(&socket, &mut engine, None, out, now)?;
                 }
-                Event::Lost(epoch) => {
-                    latest_registration = latest_registration.max(epoch);
-                    if broker.as_ref().is_some_and(|b| b.0 == epoch) {
-                        broker = None;
-                        engine.broker_lost()
-                    } else {
-                        vec![]
-                    }
+            }
+            dispatch.flush(&socket, &mut engine, broker.as_ref(), now)?;
+            if let Some(epoch) = dispatch.broker_lost.take() {
+                if broker.as_ref().is_some_and(|current| current.0 == epoch) {
+                    broker = None;
+                    let out = engine.broker_lost();
+                    dispatch.apply(&socket, &mut engine, None, out, now)?;
                 }
-                Event::Report(epoch, r, n) => {
-                    if broker.as_ref().is_some_and(|b| b.0 == epoch) {
-                        engine.report(r, n)
-                    } else {
-                        vec![]
-                    }
-                }
-            };
-            effects(&socket, broker.as_ref().map(|b| &b.1), out)?;
+            }
+            if std::mem::take(&mut dispatch.socket_reset) {
+                dispatch.purge_all(&mut engine, broker.as_ref())?;
+                let out = engine.node_gone(node);
+                dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
+                socket = Qrtr::bind()?;
+                published = false;
+                next_publication = now;
+            }
+            engine.publication_active(published);
+            *diagnostics
+                .lock()
+                .map_err(|_| io::Error::other("diagnostic state"))? = engine.diagnostics();
         }
-        if let Some((peer, bytes)) = socket.receive(Duration::from_millis(25))? {
-            let out = if peer.port == CTRL_PORT && peer.node == socket.local().node {
-                match Control::decode(&bytes) {
-                    Some(c) if c.conflicts_with(socket.local()) => {
-                        return Err(io::Error::other("competing DCM publisher"));
-                    }
-                    Some(c) if c.command == DEL_CLIENT => {
-                        engine.peer_gone(c.deleted_client().unwrap())
-                    }
-                    Some(c) if c.command == BYE => engine.node_gone(c.words[0]),
-                    _ => vec![],
-                }
-            } else {
-                engine.receive(peer, &bytes)
-            };
-            effects(&socket, broker.as_ref().map(|b| &b.1), out)?;
-        }
-        *diagnostics
-            .lock()
-            .map_err(|_| io::Error::other("diagnostic state"))? = engine.diagnostics();
-    }
-    let _ = effects(&socket, broker.as_ref().map(|b| &b.1), engine.shutdown());
-    Ok(())
+        Ok(())
+    })();
+    let cleanup = dispatch.shutdown(&mut engine, broker.as_ref());
+    operation.and(cleanup)
 }
 fn main() {
     if run().is_err() {
