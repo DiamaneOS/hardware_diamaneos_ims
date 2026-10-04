@@ -292,7 +292,15 @@ fn run() -> io::Result<()> {
     let origin = Instant::now();
     const PUBLICATION_RETRY_DELAY_MS: u64 = 30_000;
     const MAX_RECEIVED_PACKETS_PER_CYCLE: usize = 32;
+    // Short receive waits only while output is queued or input is flowing. When
+    // idle, a Binder event waits at most IDLE_WAIT_MS; switches are read each second.
+    const BUSY_WAIT_MS: u64 = 25;
+    const IDLE_WAIT_MS: u64 = 100;
+    const KILL_SWITCH_PERIOD_MS: u64 = 1_000;
     let mut next_publication = 0;
+    let mut next_kill_check = 0;
+    let mut emergency_enabled = true;
+    let mut input = false;
     let mut dispatch = Dispatch::default();
     // SAFETY: handler only stores an atomic flag; no allocation or I/O in signals.
     unsafe {
@@ -318,13 +326,17 @@ fn run() -> io::Result<()> {
                     },
                 }
             }
-            if debug_controls && prop(DCM_KILL).as_deref() == Some("1") {
-                break;
+            if debug_controls && now >= next_kill_check {
+                next_kill_check = now.saturating_add(KILL_SWITCH_PERIOD_MS);
+                if prop(DCM_KILL).as_deref() == Some("1") {
+                    break;
+                }
+                emergency_enabled = prop(EMERGENCY_PDN_KILL).as_deref() != Some("1");
             }
-            let enabled = !debug_controls || prop(EMERGENCY_PDN_KILL).as_deref() != Some("1");
-            let mut out = engine.set_emergency_enabled(enabled);
+            let mut out = engine.set_emergency_enabled(emergency_enabled);
             out.extend(engine.expire(now));
             dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
+            let mut busy = input;
             // Bound work per iteration so a broker flood cannot starve QRTR or signals.
             for _ in 0..32 {
                 let e = match rx.try_recv() {
@@ -334,6 +346,7 @@ fn run() -> io::Result<()> {
                         return Err(io::Error::other("binder disconnected"))
                     }
                 };
+                busy = true;
                 let out = match e {
                     Event::Register(epoch, b, d) => {
                         if epoch <= latest_registration {
@@ -364,6 +377,15 @@ fn run() -> io::Result<()> {
                 };
                 dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
             }
+            let mut wait = if busy || dispatch.queued() {
+                BUSY_WAIT_MS
+            } else {
+                IDLE_WAIT_MS
+            };
+            if let Some(deadline) = engine.next_deadline() {
+                wait = wait.min(deadline.saturating_sub(now));
+            }
+            input = false;
             // Drain a bounded quantum, as for Binder events, so a local flood of
             // the reserved port cannot crowd modem requests out of the socket.
             for index in 0..MAX_RECEIVED_PACKETS_PER_CYCLE {
@@ -371,12 +393,15 @@ fn run() -> io::Result<()> {
                     break;
                 }
                 let wait = if index == 0 {
-                    Duration::from_millis(25)
+                    Duration::from_millis(wait)
                 } else {
                     Duration::ZERO
                 };
                 let (peer, bytes) = match socket.receive(wait) {
-                    Ok(Some(packet)) => packet,
+                    Ok(Some(packet)) => {
+                        input = true;
+                        packet
+                    }
                     Ok(None) => break,
                     Err(error) => match classify(&error) {
                         Fault::Retry => {

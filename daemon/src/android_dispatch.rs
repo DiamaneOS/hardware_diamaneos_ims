@@ -102,6 +102,10 @@ impl Dispatch {
         }
         effects
     }
+    /// Output still waits for submission or retry.
+    pub fn queued(&self) -> bool {
+        self.queue.peer_count() != 0
+    }
     pub fn purge_all(&mut self, engine: &mut Engine, broker: Option<&Broker>) {
         let work = self.queue.drain();
         self.finish_purged(engine, broker, work);
