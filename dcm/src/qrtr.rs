@@ -11,6 +11,28 @@ pub const DEL_CLIENT: u32 = 6;
 pub const BYE: u32 = 3;
 pub const NEW_LOOKUP: u32 = 10;
 pub const DEL_LOOKUP: u32 = 11;
+/// Publication's handling of a datagram read while its lookup is pending.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lookup {
+    Conflict,
+    Complete,
+    /// For the main loop after publication: modem traffic to the fixed port
+    /// and control notices such as client or node loss.
+    Keep,
+    /// Ordinary datagrams from this node are never served.
+    Ignore,
+}
+pub fn lookup_input(local: Peer, from: Peer, bytes: &[u8]) -> Lookup {
+    let control = from.node == local.node && from.port == CTRL_PORT;
+    if from.node == local.node && !control {
+        return Lookup::Ignore;
+    }
+    match Control::decode(bytes) {
+        Some(c) if control && c.conflicts_with(local) => Lookup::Conflict,
+        Some(c) if control && c.lookup_complete() => Lookup::Complete,
+        _ => Lookup::Keep,
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Control {
     pub command: u32,

@@ -598,6 +598,55 @@ fn conflict_watch_ignores_self_and_remote_nodes_and_rejects_local_publishers() {
 }
 
 #[test]
+fn publication_keeps_modem_requests_and_notices_but_not_local_datagrams() {
+    use diamaneos_ims_dcm::qrtr::*;
+    let local = Peer {
+        node: 1,
+        port: 0x7fff,
+    };
+    let control = Peer {
+        node: 1,
+        port: CTRL_PORT,
+    };
+    let competitor = Control::server(NEW_SERVER, Peer { node: 1, port: 901 }).encode();
+    assert_eq!(lookup_input(local, control, &competitor), Lookup::Conflict);
+    // Only the local name service decides publication; the engine drops the rest.
+    let remote_control = Peer {
+        node: MODEM.node,
+        port: CTRL_PORT,
+    };
+    assert_eq!(
+        lookup_input(local, remote_control, &competitor),
+        Lookup::Keep
+    );
+    let complete = Control {
+        command: NEW_SERVER,
+        words: [0; 4],
+    };
+    assert_eq!(
+        lookup_input(local, control, &complete.encode()),
+        Lookup::Complete
+    );
+    // Own and remote records, and loss notices, go to the main loop's rules.
+    for notice in [
+        Control::server(NEW_SERVER, local),
+        Control::server(NEW_SERVER, MODEM),
+        Control {
+            command: BYE,
+            words: [MODEM.node, 0, 0, 0],
+        },
+    ] {
+        assert_eq!(lookup_input(local, control, &notice.encode()), Lookup::Keep);
+    }
+    let request = activate(1, 1, 0, false, 0);
+    assert_eq!(lookup_input(local, MODEM, &request), Lookup::Keep);
+    // A local client cannot fill the bounded buffer ahead of modem requests.
+    let client = Peer { node: 1, port: 77 };
+    assert_eq!(lookup_input(local, client, &request), Lookup::Ignore);
+    assert_eq!(lookup_input(local, client, &competitor), Lookup::Ignore);
+}
+
+#[test]
 fn lifecycle_diagnostics_distinguish_release_stale_report_and_reactivation() {
     let mut engine = connected();
     let first = engine.receive(MODEM, &activate(1, 1, 0, false, 0));
