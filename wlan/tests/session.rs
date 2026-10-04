@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 use diamaneos_wlan_reporting::{
     session::{Observation, Session},
-    Connected,
+    Connected, BIND_SUBSCRIPTION, DATA_SETTINGS, DEFAULT_PROFILE_STATUS, INDICATION_REGISTRATION,
+    WLAN_STATUS,
 };
 fn connected() -> Observation {
     Observation {
@@ -23,9 +24,17 @@ fn ack(request: &[u8]) -> [u8; 14] {
     ]
 }
 fn ready(s: &mut Session) {
-    for id in [0x27, 0x38, 0x20, 0x43, 0x34, 0x43, 0x20] {
+    for id in [
+        BIND_SUBSCRIPTION,
+        INDICATION_REGISTRATION,
+        DEFAULT_PROFILE_STATUS,
+        WLAN_STATUS,
+        DATA_SETTINGS,
+        DEFAULT_PROFILE_STATUS,
+        WLAN_STATUS,
+    ] {
         let p = s.poll(0).unwrap();
-        assert_eq!(p[3], id);
+        assert_eq!(u16::from(p[3]), id);
         s.receive(&ack(&p));
     }
     assert!(s.poll(0).is_none());
@@ -49,12 +58,18 @@ fn bind_clear_and_ack_before_announcing_available() {
     assert_eq!(registration[3], 0x38);
     a.receive(&ack(&registration));
     let clear = a.poll(0).unwrap();
-    assert_eq!(&clear[clear.len() - 8..clear.len() - 4], &[0, 0, 0, 0]);
+    assert_eq!(u16::from(clear[3]), DEFAULT_PROFILE_STATUS);
+    assert_eq!(&clear[clear.len() - 4..], &1_u32.to_le_bytes());
     assert!(a.poll(1).is_none());
     a.receive(&ack(&clear));
-    for id in [0x43, 0x34, 0x43, 0x20] {
+    for id in [
+        WLAN_STATUS,
+        DATA_SETTINGS,
+        DEFAULT_PROFILE_STATUS,
+        WLAN_STATUS,
+    ] {
         let p = a.poll(2).unwrap();
-        assert_eq!(p[3], id);
+        assert_eq!(u16::from(p[3]), id);
         a.receive(&ack(&p));
     }
     assert!(a.poll(3).is_none());
@@ -62,7 +77,7 @@ fn bind_clear_and_ack_before_announcing_available() {
     let registration = b.poll(0).unwrap();
     assert_eq!(registration[3], 0x38);
     b.receive(&ack(&registration));
-    assert_eq!(b.poll(0).unwrap()[3], 0x20);
+    assert_eq!(u16::from(b.poll(0).unwrap()[3]), DEFAULT_PROFILE_STATUS);
 }
 #[test]
 fn disconnect_during_pending_up_does_not_retry_stale_up() {
@@ -118,7 +133,7 @@ fn diagnostics_distinguish_pending_and_acknowledged_status() {
     let mut s = Session::new(1, 1).unwrap();
     s.observe(connected());
     assert_eq!(s.diagnostics().stage, 0);
-    for next_stage in [8, 1, 7, 2, 7, 3, 5] {
+    for next_stage in [8, 7, 1, 2, 7, 3, 5] {
         let p = s.poll(0).unwrap();
         s.receive(&ack(&p));
         assert_eq!(s.diagnostics().stage, next_stage);
@@ -148,7 +163,10 @@ fn new_modem_session_rebinds_and_clears_before_replaying() {
     let registration = restarted.poll(1).unwrap();
     assert_eq!(registration[3], 0x38);
     restarted.receive(&ack(&registration));
-    assert_eq!(restarted.poll(2).unwrap()[3], 0x20);
+    assert_eq!(
+        u16::from(restarted.poll(2).unwrap()[3]),
+        DEFAULT_PROFILE_STATUS
+    );
 }
 
 #[test]
@@ -238,9 +256,15 @@ fn default_profile_requires_connected_validated_default_network() {
                     .with_default_route(default_route),
                 ),
             });
-            for id in [0x27, 0x38, 0x20, 0x43, 0x34] {
+            for id in [
+                BIND_SUBSCRIPTION,
+                INDICATION_REGISTRATION,
+                DEFAULT_PROFILE_STATUS,
+                WLAN_STATUS,
+                DATA_SETTINGS,
+            ] {
                 let request = s.poll(0).unwrap();
-                assert_eq!(request[3], id);
+                assert_eq!(u16::from(request[3]), id);
                 if id == 0x43 {
                     // Startup reconciliation never reports a connected profile.
                     assert_eq!(&request[request.len() - 4..], &[1, 0, 0, 0]);
@@ -470,12 +494,17 @@ fn superseded_unacknowledged_switch_is_reconciled_with_a_new_transaction() {
 }
 
 #[test]
-fn startup_clears_both_contexts_without_guessing_switch_before_observation() {
+fn startup_revokes_profile_before_station_and_waits_for_authenticated_observation() {
     for subscription in [1, 2] {
         let mut session = Session::new(subscription, u64::from(subscription)).unwrap();
-        for message in [0x27, 0x38, 0x20, 0x43] {
+        for message in [
+            BIND_SUBSCRIPTION,
+            INDICATION_REGISTRATION,
+            DEFAULT_PROFILE_STATUS,
+            WLAN_STATUS,
+        ] {
             let packet = session.poll(0).unwrap();
-            assert_eq!(packet[3], message);
+            assert_eq!(u16::from(packet[3]), message);
             session.receive(&ack(&packet));
         }
         assert_eq!(session.diagnostics().stage, 9);
@@ -487,7 +516,7 @@ fn startup_clears_both_contexts_without_guessing_switch_before_observation() {
         });
         for message in [0x43, 0x20, 0x34] {
             let packet = session.poll(10_001).unwrap();
-            assert_eq!(packet[3], message);
+            assert_eq!(u16::from(packet[3]), message);
             session.receive(&ack(&packet));
         }
         assert!(session.settled());

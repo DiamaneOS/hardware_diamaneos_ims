@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 use diamaneos_wlan_reporting::{
+    BIND_SUBSCRIPTION, DATA_SETTINGS, DEFAULT_PROFILE_STATUS, INDICATION_REGISTRATION, WLAN_STATUS,
+};
+use diamaneos_wlan_reporting::{
     keepalive_instruction, keepalive_operation_failed,
     session::{Observation, Session},
     Connected,
@@ -30,9 +33,17 @@ fn connected() -> Observation {
 fn ready() -> Session {
     let mut s = Session::new(1, 1).unwrap();
     s.observe(connected());
-    for id in [0x27, 0x38, 0x20, 0x43, 0x34, 0x43, 0x20] {
+    for id in [
+        BIND_SUBSCRIPTION,
+        INDICATION_REGISTRATION,
+        DEFAULT_PROFILE_STATUS,
+        WLAN_STATUS,
+        DATA_SETTINGS,
+        DEFAULT_PROFILE_STATUS,
+        WLAN_STATUS,
+    ] {
         let p = s.poll(0).unwrap();
-        assert_eq!(p[3], id);
+        assert_eq!(u16::from(p[3]), id);
         s.receive(&ack(&p));
     }
     assert!(s.settled());
@@ -104,9 +115,17 @@ fn burst_capacity_is_fixed_and_unbound_instructions_are_ignored() {
     unbound.observe(connected());
     unbound.receive(&instruction());
     assert_eq!(unbound.keepalive_diagnostics().sent, 0);
-    for id in [0x27, 0x38, 0x20, 0x43, 0x34, 0x43, 0x20] {
+    for id in [
+        BIND_SUBSCRIPTION,
+        INDICATION_REGISTRATION,
+        DEFAULT_PROFILE_STATUS,
+        WLAN_STATUS,
+        DATA_SETTINGS,
+        DEFAULT_PROFILE_STATUS,
+        WLAN_STATUS,
+    ] {
         let p = unbound.poll(0).unwrap();
-        assert_eq!(p[3], id);
+        assert_eq!(u16::from(p[3]), id);
         unbound.receive(&ack(&p));
     }
     assert!(unbound.poll(1).is_none());
@@ -170,13 +189,13 @@ fn continuous_control_traffic_cannot_starve_reply_deadlines_or_terminal_expiry()
         s.receive(&ack(&control));
         for id in [0x20, 0x34] {
             let p = s.poll(now).unwrap();
-            assert_eq!(p[3], id);
+            assert_eq!(u16::from(p[3]), id);
             s.receive(&ack(&p));
         }
         s.observe(connected());
         for id in [0x34, 0x43, 0x20] {
             let p = s.poll(now).unwrap();
-            assert_eq!(p[3], id);
+            assert_eq!(u16::from(p[3]), id);
             s.receive(&ack(&p));
         }
         if now < 6000 {
