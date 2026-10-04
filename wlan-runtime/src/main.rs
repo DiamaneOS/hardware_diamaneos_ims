@@ -189,6 +189,8 @@ struct Client {
     failures: u8,
     last_observation: Option<Observation>,
     lookup_pending: bool,
+    // A replacement socket failed to bind; retry each cycle with this renewal count.
+    rebind: Option<u8>,
 }
 impl Client {
     fn new(subscription: u32, node: u32) -> io::Result<Self> {
@@ -213,15 +215,35 @@ impl Client {
             failures: 0,
             last_observation: None,
             lookup_pending: true,
+            rebind: None,
         })
     }
 
-    fn reconnect(&mut self, node: u32) -> io::Result<()> {
-        let next = Self::new(self.subscription, node)?;
-        *self = next;
-        Ok(())
+    /// The old socket and session stay owned until a replacement binds, so a
+    /// failed bind is retried next cycle instead of stopping the reporter.
+    /// Nonzero renewal counts carry over with their observation.
+    fn reconnect(&mut self, node: u32, failures: u8) -> bool {
+        match Self::new(self.subscription, node) {
+            Ok(mut next) => {
+                if failures != 0 {
+                    next.failures = failures;
+                    next.last_observation = self.last_observation.take();
+                }
+                *self = next;
+                true
+            }
+            Err(_) => {
+                self.rebind = Some(failures);
+                false
+            }
+        }
     }
     fn step(&mut self, node: u32, observation: Option<&Observation>, now: u64) -> io::Result<()> {
+        if let Some(failures) = self.rebind {
+            if !self.reconnect(node, failures) {
+                return Ok(());
+            }
+        }
         if self.last_observation.as_ref() != observation {
             self.failures = 0;
             self.last_observation = observation.cloned();
@@ -230,11 +252,11 @@ impl Client {
             if self.retry_at == 0 {
                 self.retry_at = now.saturating_add(SESSION_RENEWAL_DELAY_MS);
             }
-            if now >= self.retry_at && self.failures < MAX_SESSION_RENEWALS {
-                let failures = self.failures + 1;
-                self.reconnect(node)?;
-                self.failures = failures;
-                self.last_observation = observation.cloned();
+            if now >= self.retry_at
+                && self.failures < MAX_SESSION_RENEWALS
+                && !self.reconnect(node, self.failures + 1)
+            {
+                return Ok(());
             }
         }
         if let Some(observation) = observation {
@@ -257,7 +279,7 @@ impl Client {
                 Err(error) => match classify(&error) {
                     Fault::Retry => return Ok(()),
                     Fault::PeerGone | Fault::SocketReset => {
-                        self.reconnect(node)?;
+                        self.reconnect(node, 0);
                         return Ok(());
                     }
                     Fault::Unexpected => return Err(error),
@@ -272,7 +294,7 @@ impl Client {
                 Err(error) => match classify(&error) {
                     Fault::Retry => break,
                     Fault::PeerGone | Fault::SocketReset => {
-                        self.reconnect(node)?;
+                        self.reconnect(node, 0);
                         return Ok(());
                     }
                     Fault::Unexpected => return Err(error),
@@ -311,7 +333,7 @@ impl Client {
                                     port: c.words[3],
                                 });
                     if gone {
-                        self.reconnect(node)?;
+                        self.reconnect(node, 0);
                         break;
                     }
                 }
@@ -328,7 +350,7 @@ impl Client {
                         // enqueue a second copy or reset the other subscription.
                         Fault::Retry => break,
                         Fault::PeerGone | Fault::SocketReset => {
-                            self.reconnect(node)?;
+                            self.reconnect(node, 0);
                             break;
                         }
                         Fault::Unexpected => return Err(error),
