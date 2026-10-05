@@ -89,6 +89,20 @@ impl<'a> Frame<'a> {
     pub fn required(&self, tag: u8) -> Result<&'a [u8], Error> {
         self.tlv(tag).ok_or(Error::Missing)
     }
+    /// Iterate TLVs in wire order. `parse` has already validated the framing,
+    /// so a short trailing fragment simply ends the iteration.
+    pub fn tlvs(&self) -> impl Iterator<Item = (u8, &'a [u8])> {
+        let mut rest = self.body;
+        std::iter::from_fn(move || {
+            if rest.len() < 3 {
+                return None;
+            }
+            let n = u16::from_le_bytes([rest[1], rest[2]]) as usize;
+            let (tag, value) = (rest[0], rest.get(3..3 + n)?);
+            rest = &rest[3 + n..];
+            Some((tag, value))
+        })
+    }
     pub fn optional_u32(&self, tag: u8) -> Result<Option<u32>, Error> {
         self.tlv(tag).map(u32_value).transpose()
     }

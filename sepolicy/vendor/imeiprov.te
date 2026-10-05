@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The DiamaneOS Project
+#
+# imeiprovd (/vendor/bin/imeiprovd, user vendor_imeiprov, no supplementary
+# groups, no capabilities): the one-shot IMEI provisioning tool for finding -171.
+# It reads the two IMEIs from the read-only traceability partition and, in
+# --write mode, provisions modem NV 550 over the Fairphone TCL QMI service
+# (QRTR service 0x2ff). It replaces only the modem-NV part of stock `tctd`; it
+# sets no properties, writes no MAC/region data and opens no non-QRTR socket.
+#
+# It gets exactly: a QRTR socket, read-only access to the traceability block
+# device, and the SELinux enforce flag it checks before running. Nothing else.
+type diamaneos_imeiprov, domain;
+type diamaneos_imeiprov_exec, exec_type, vendor_file_type, file_type;
+init_daemon_domain(diamaneos_imeiprov)
+
+# QRTR client: bind an ephemeral port and exchange QMI datagrams with the modem
+# service. No ioctls; QRTR discovery and messaging are plain socket calls.
+allow diamaneos_imeiprov self:qipcrtr_socket { create bind getattr read write };
+
+# Read-only traceability partition: resolve the /dev/block/by-name symlinks and
+# read the labelled block device. Never write it (neverallow below).
+allow diamaneos_imeiprov block_device:dir search;
+allow diamaneos_imeiprov block_device:lnk_file read;
+allow diamaneos_imeiprov vendor_traceability_block_device:blk_file { open read getattr };
+
+# Refuse to run unless caller isolation is enforced (read /sys/fs/selinux/enforce).
+allow diamaneos_imeiprov selinuxfs:file r_file_perms;
+
+# --- least privilege, enforced by neverallow ---
+neverallow diamaneos_imeiprov self:global_capability_class_set *;
+neverallow diamaneos_imeiprov self:global_capability2_class_set *;
+# No non-QRTR sockets of any kind (no Internet, no local IPC beyond QRTR).
+neverallow diamaneos_imeiprov self:{ diamaneos_nonlocal_socket_classes } create;
+# Never write any block device: the traceability partition is read-only to us,
+# and modem NV is reached only through QMI, never by writing a partition.
+neverallow diamaneos_imeiprov dev_type:blk_file { write append };
+# Sets no property (the mode is a fixed rc argument, not a property).
+neverallow diamaneos_imeiprov property_type:property_service set;
+# No persistent file writes. coredump_file (userdebug) and method_trace_data_file
+# (coverage builds) are granted to every domain by the platform policy.
+neverallow diamaneos_imeiprov {
+  data_file_type
+  -coredump_file
+  -method_trace_data_file
+}:file { create write append rename link unlink setattr };
+# Uses no Binder at all.
+neverallow diamaneos_imeiprov { domain -su }:binder { call transfer };
+neverallow diamaneos_imeiprov servicemanager:service_manager *;
