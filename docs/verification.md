@@ -3,8 +3,14 @@
 Host checks exercise the DCM codec and connection state machine, emergency
 capacity and selection, unavailable Wi-Fi profile handling, transaction/peer
 fences, bounded retries, stale callback rejection, address eligibility and broker
-network replacement. Run `tests/run-host-tests.sh`; use the resulting report for
-case counts. These tests place no calls, send no SMS and contact no endpoints.
+network replacement. Emergency coverage includes dual-SIM and no-SIM requests,
+IMS and emergency side by side, broker and modem restarts, the session reserve
+and a randomised model check of the emergency lifecycle; the real broker classes
+run against host-only Android fixtures to check its emergency request rules; and
+a policy check pins the build, SELinux and init settings that keep emergency
+service on in user builds. Run `tests/run-host-tests.sh`; use the resulting
+report for case counts. These tests place no calls, send no SMS and contact no
+endpoints.
 
 The ordinary Qualcomm IMS service owns signalling, voice, Wi-Fi calling and
 carrier emergency-location mechanisms. This component provides restricted data
