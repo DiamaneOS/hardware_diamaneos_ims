@@ -24,14 +24,22 @@ IMEI or any other identifier.
 
 ## Modes
 
-- `--check` (the shipped configuration): decode, validate and compare; never
-  writes. The init service (`imeiprovd.rc`) runs `imeiprovd --check`.
-- `--write`: as `--check`, then provision the differing NV items and verify.
+- `--check`: decode, validate and compare; never writes. Used for dry runs
+  (`adb shell su 0 /vendor/bin/imeiprovd --check` on a userdebug build).
+- `--write` (the shipped configuration; `imeiprovd.rc` runs it once per boot):
+  as `--check`, then, only after a successful read that shows NV 550
+  unprovisioned or different from slot 1, provision both subscriptions and
+  read back.
 
-Writing is enabled by changing the single argument in `imeiprovd.rc` from
-`--check` to `--write`. `--write` fails closed: if validation fails, or the
-modem rejects the write, or the read-back does not match, it writes nothing (or
-reports failure) rather than leaving a bad value.
+Writing at every boot is needed: activating a slot (`fastboot --set-active`,
+and every OTA) makes the bootloader restore the modem's file system from its
+golden copy (fsg), which holds no IMEI, so NV 550 is unprovisioned again (seen
+on the FP6 on 2026-10-05; a plain reboot or a bootloader round trip keeps it).
+Stock `tctd` writes the IMEIs at every boot for the same reason.
+
+`--write` refuses to write unless both traceability IMEIs are 15 digits, pass
+the Luhn check and differ. A failed write or read-back is logged and the tool
+exits non-zero; it does not retry until the next boot.
 
 ## Privileges
 
@@ -75,7 +83,7 @@ Luhn digits). Run with the repository host tests (`./tests/run-host-tests.sh`).
 
 ## Verifying on a phone (dry run)
 
-With `--check`:
+Dry run with `--check` (before `--write` is enabled, or on demand as root):
 
 1. Boot the device; the service runs once after persistent properties are ready.
 2. Read the result: `adb logcat -d -s imeiprovd` (or run it on demand as root on
