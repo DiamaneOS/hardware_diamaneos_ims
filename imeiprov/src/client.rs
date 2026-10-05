@@ -84,10 +84,6 @@ impl Client {
         })
     }
 
-    pub fn local(&self) -> Peer {
-        self.local
-    }
-
     fn send(&self, to: Peer, bytes: &[u8]) -> io::Result<()> {
         let addr = Address {
             family: AF_QIPCRTR as u16,
