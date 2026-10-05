@@ -203,7 +203,7 @@ fn known_broker_loss_invalidates_retained_up_before_submission() {
     let request = request.unwrap();
     let effects = e.report(request, Some(network(1, 10)));
     let (pending, _) = retain(&mut e, effects);
-    e.broker_lost(0);
+    e.broker_lost();
     assert!(!e.request_is_current(request));
     for p in pending {
         assert!(e.prepare_output(&p).is_none());

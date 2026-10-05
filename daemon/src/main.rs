@@ -333,8 +333,7 @@ fn run() -> io::Result<()> {
                 }
                 emergency_enabled = prop(EMERGENCY_PDN_KILL).as_deref() != Some("1");
             }
-            let mut out = engine.set_emergency_enabled(emergency_enabled);
-            out.extend(engine.expire(now));
+            let out = engine.set_emergency_enabled(emergency_enabled);
             dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
             let mut busy = input;
             // Bound work per iteration so a broker flood cannot starve QRTR or signals.
@@ -354,7 +353,8 @@ fn run() -> io::Result<()> {
                         }
                         latest_registration = epoch;
                         if broker.is_some() {
-                            engine.broker_lost(now);
+                            let out = engine.broker_lost();
+                            dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
                         }
                         broker = Some((epoch, b, d));
                         engine.broker_connected()
@@ -363,9 +363,10 @@ fn run() -> io::Result<()> {
                         latest_registration = latest_registration.max(epoch);
                         if broker.as_ref().is_some_and(|b| b.0 == epoch) {
                             broker = None;
-                            engine.broker_lost(now);
+                            engine.broker_lost()
+                        } else {
+                            vec![]
                         }
-                        vec![]
                     }
                     Event::Report(epoch, r, n) => {
                         if broker.as_ref().is_some_and(|b| b.0 == epoch) {
@@ -377,14 +378,11 @@ fn run() -> io::Result<()> {
                 };
                 dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
             }
-            let mut wait = if busy || dispatch.queued() {
+            let wait = if busy || dispatch.queued() {
                 BUSY_WAIT_MS
             } else {
                 IDLE_WAIT_MS
             };
-            if let Some(deadline) = engine.next_deadline() {
-                wait = wait.min(deadline.saturating_sub(now));
-            }
             input = false;
             // Drain a bounded quantum, as for Binder events, so a local flood of
             // the reserved port cannot crowd modem requests out of the socket.
@@ -448,7 +446,8 @@ fn run() -> io::Result<()> {
             if let Some(epoch) = dispatch.broker_lost.take() {
                 if broker.as_ref().is_some_and(|current| current.0 == epoch) {
                     broker = None;
-                    engine.broker_lost(now);
+                    let out = engine.broker_lost();
+                    dispatch.apply(&socket, &mut engine, None, out, now)?;
                 }
             }
             if !dispatch.socket_reset {
@@ -457,7 +456,8 @@ fn run() -> io::Result<()> {
             if let Some(epoch) = dispatch.broker_lost.take() {
                 if broker.as_ref().is_some_and(|current| current.0 == epoch) {
                     broker = None;
-                    engine.broker_lost(now);
+                    let out = engine.broker_lost();
+                    dispatch.apply(&socket, &mut engine, None, out, now)?;
                 }
             }
             if std::mem::take(&mut dispatch.socket_reset) {
