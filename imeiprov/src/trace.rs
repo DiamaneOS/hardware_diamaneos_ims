@@ -8,7 +8,7 @@
 //! two windows; it never reads the region/CU byte (0x19d) or the MAC fields, and
 //! it never writes.
 
-use crate::imei::{Error as ImeiError, Imei};
+use diamaneos_imeiprov::imei::{Error as ImeiError, Imei};
 use std::fs::File;
 use std::io;
 use std::os::unix::fs::{FileExt, OpenOptionsExt};
