@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The DiamaneOS Project
-//! Single-owner state machine. Adapters execute effects in order. No I/O or
-//! timers: the adapter passes the current time in.
+//! Single-owner state machine. Adapters execute effects in order. No I/O or timers.
 use crate::outgoing::{
     self, Disposition, Fence, Packet, PeerLife, Retained, SidLife, SidStamp, UpSnapshot,
 };
@@ -17,10 +16,6 @@ pub const MAX_SESSIONS: usize = (LAST_SESSION_ID - FIRST_SESSION_ID + 1) as usiz
 // entire ID pool. Reservation does not bypass the independent four-client limit.
 const EMERGENCY_RESERVE: usize = 8;
 const MAX_CLIENTS: usize = 4;
-/// Downstream recovery choice: keep groups this long after broker loss, so a
-/// broker that registers again re-files them instead of waiting for the modem's
-/// activation retry (minutes). Afterwards sessions end as on immediate loss.
-pub const BROKER_GRACE_MS: u64 = 15_000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Peer {
     pub node: u32,
@@ -121,7 +116,6 @@ pub struct Diagnostics {
     pub stale_reports: u64,
     pub broker_registrations: u64,
     pub broker_losses: u64,
-    pub broker_grace_expiries: u64,
     pub client_losses: u64,
     // Live clients whose sessions ended after their output stalled.
     pub client_stalls: u64,
@@ -143,7 +137,6 @@ pub struct Engine {
     slots: u32,
     emergency_enabled: bool,
     broker: bool,
-    broker_grace_until: Option<u64>,
     serial: i32,
     sessions: Vec<Session>,
     groups: BTreeMap<Key, Group>,
@@ -162,7 +155,6 @@ impl Engine {
             slots,
             emergency_enabled: true,
             broker: false,
-            broker_grace_until: None,
             serial: 0,
             sessions: vec![],
             groups: BTreeMap::new(),
@@ -381,7 +373,6 @@ impl Engine {
             self.diagnostics.broker_registrations.saturating_add(1);
         // Replacement is a new epoch: old reports cannot revive a released request.
         self.broker = true;
-        self.broker_grace_until = None;
         let keys: Vec<_> = self.groups.keys().copied().collect();
         let mut out = vec![];
         for key in keys {
@@ -399,39 +390,9 @@ impl Engine {
         }
         out
     }
-    /// Revoke the lost broker's networks at once, so no queued UP can be sent,
-    /// but keep groups and sessions until `expire` passes the grace deadline.
-    pub fn broker_lost(&mut self, now: u64) {
+    pub fn broker_lost(&mut self) -> Vec<Effect> {
         self.diagnostics.broker_losses = self.diagnostics.broker_losses.saturating_add(1);
         self.broker = false;
-        for group in self.groups.values_mut() {
-            group.network = None;
-        }
-        for s in &mut self.sessions {
-            s.address = None;
-            s.submitted_address = None;
-            s.last_network = None;
-        }
-        if !self.groups.is_empty() && self.broker_grace_until.is_none() {
-            self.broker_grace_until = Some(now.saturating_add(BROKER_GRACE_MS));
-        }
-    }
-    /// The adapter's next call to `expire`, if one is pending.
-    pub fn next_deadline(&self) -> Option<u64> {
-        self.broker_grace_until
-    }
-    /// Without a broker by the deadline, end every session and release its group.
-    pub fn expire(&mut self, now: u64) -> Vec<Effect> {
-        if self.broker
-            || self
-                .broker_grace_until
-                .is_none_or(|deadline| now < deadline)
-        {
-            return vec![];
-        }
-        self.broker_grace_until = None;
-        self.diagnostics.broker_grace_expiries =
-            self.diagnostics.broker_grace_expiries.saturating_add(1);
         let peers: Vec<_> = self.indications.keys().copied().collect();
         let mut out = vec![];
         for peer in peers {
@@ -505,14 +466,9 @@ impl Engine {
             })
             .copied()
             .collect();
-        let out = keys
-            .into_iter()
+        keys.into_iter()
             .filter_map(|k| self.groups.remove(&k).map(|g| Effect::Release(g.request)))
-            .collect();
-        if self.groups.is_empty() {
-            self.broker_grace_until = None; // Nothing left to keep.
-        }
-        out
+            .collect()
     }
     fn fail_matching(&mut self, predicate: impl Fn(&Session) -> bool) -> Vec<Effect> {
         let ids: Vec<_> = self

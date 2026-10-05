@@ -9,15 +9,7 @@ Each process runs as its own identity:
 | Wi-Fi reporter (optional) | UID 2991, configured modem DSD endpoint, private Binder service | Internet, location, SMS, routing changes, capabilities |
 | Wi-Fi observer (optional) | Passive Wi-Fi/network reads, `RADIO_SCAN_WITHOUT_LOCATION` | Internet permission, scans, location, phone-state and network-setting permissions |
 
-The daemon owns all protocol state on one thread. Binder callbacks enqueue bounded
-messages. Session IDs are bounded to 20–98, with capacity reserved for emergency
-requests. One group per slot/type holds the Android request; IPv4/IPv6 sessions
-reference that group. Reports carry generation serials. Address disappearance,
-network loss and unavailable requests never produce a success address. No custom
-emergency setup timeout competes with the modem's retry policy. Broker loss revokes
-its networks at once but keeps groups and sessions for a downstream 15-second
-grace period, so a broker that registers again re-files them within seconds.
-Without one, the sessions then end with terminal results.
+## DCM daemon
 
 - One thread owns all protocol state. Binder callbacks enqueue bounded messages.
 - Session IDs 20–98, with emergency capacity reserved (see
