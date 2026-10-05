@@ -3,18 +3,20 @@
 #
 # One-shot IMEI provisioning (finding -171). Reads the read-only traceability
 # partition, validates both IMEIs and compares them with the modem's current
-# NV 550 value. This build runs --check only: it logs booleans to logcat (tag
-# imeiprovd) and never prints an identifier, never writes NV, sets no property
-# and opens no non-QRTR socket. Writing is enabled later by the main session by
-# changing the single argument below to --write, after the phone dry-run
-# (see docs/imei-provisioning.md).
+# NV 550 value. With --write it writes NV 550 for both subscriptions only when
+# the modem's value differs, then reads it back; it never touches the partition.
+# It runs at every boot, as stock tctd does: activating a slot (fastboot
+# --set-active, every OTA) makes the bootloader restore the modem's file system
+# from its golden copy, which has no IMEI, so NV 550 must be written again.
+# It logs booleans to logcat (tag imeiprovd), never an identifier, sets no
+# property and opens no non-QRTR socket (see docs/imei-provisioning.md).
 #
 # - Own vendor user/group (config.fs), no supplementary groups, no capabilities
 #   (an empty capabilities list drops them all for a non-root user).
 # - oneshot: runs once per boot and exits; init does not restart it.
 # - disabled, started only by the system_ext trigger in imeiprovd-control.rc,
 #   because a vendor init trigger cannot gate on persistent-properties readiness.
-service vendor.imeiprovd /vendor/bin/imeiprovd --check
+service vendor.imeiprovd /vendor/bin/imeiprovd --write
     class main
     user vendor_imeiprov
     group vendor_imeiprov
