@@ -11,7 +11,10 @@ use std::time::{Duration, Instant};
 use std::{io, mem};
 
 const AF_QIPCRTR: libc::c_int = 42;
-const RECV_BUF: usize = 4096;
+/// Large enough for the TCL service's biggest message: its service object
+/// declares max_msg 0x100e (4110) bytes of TLVs, plus the 7-byte QMI header.
+/// NV read replies use the full size, so a 4096-byte buffer truncated them.
+const RECV_BUF: usize = 8192;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -141,12 +144,14 @@ impl Client {
         let mut from_len = mem::size_of::<Address>() as libc::socklen_t;
         // SAFETY: recvfrom writes at most RECV_BUF bytes into the owned buffer
         // and the address into the sized struct; lengths are checked after.
+        // MSG_TRUNC makes it return the datagram's real length, so a reply
+        // larger than the buffer is reported instead of silently cut.
         let n = unsafe {
             libc::recvfrom(
                 self.fd.as_raw_fd(),
                 bytes.as_mut_ptr().cast(),
                 bytes.len(),
-                libc::MSG_DONTWAIT,
+                libc::MSG_DONTWAIT | libc::MSG_TRUNC,
                 (&mut a as *mut Address).cast(),
                 &mut from_len,
             )
@@ -161,6 +166,9 @@ impl Client {
             } else {
                 Err(e)
             };
+        }
+        if n as usize > bytes.len() {
+            return Err(io::Error::other("QRTR datagram larger than the receive buffer"));
         }
         if from_len as usize != mem::size_of::<Address>() || a.family != AF_QIPCRTR as u16 {
             return Ok(None);
