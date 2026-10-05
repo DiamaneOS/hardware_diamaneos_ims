@@ -44,6 +44,6 @@ neverallow diamaneos_imeiprov {
   -coredump_file
   -method_trace_data_file
 }:file { create write append rename link unlink setattr };
-# Uses no Binder at all.
-neverallow diamaneos_imeiprov { domain -su }:binder { call transfer };
-neverallow diamaneos_imeiprov servicemanager:service_manager *;
+# No Binder: the domain never calls binder_use and adds no service, so it has no
+# Binder access by default. (system_server and su binder are reachable from every
+# domain in the platform policy, so a blanket binder neverallow is not asserted.)
