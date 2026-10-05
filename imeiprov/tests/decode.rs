@@ -88,18 +88,24 @@ fn read_request_is_tlv01_with_item_550() {
 }
 
 #[test]
-fn write_request_payload_mirrors_struct() {
-    let bytes = message::build_imei_write_request(1, &imei_a(), 0).unwrap();
+fn write_request_matches_the_stock_idl() {
+    // TLV 0x01 u16 item, TLV 0x02 u32 data length, TLV 0x03 u8[512] data
+    // (stock IDL message 7, max encoded length 527).
+    let bytes = message::build_imei_write_request(1, &imei_a(), 1).unwrap();
     assert_eq!(bytes[0], 0);
     assert_eq!(&bytes[3..5], &message::MSG_NV_WRITE.to_le_bytes());
-    assert_eq!(bytes[7], 0x01); // mandatory TLV tag
-    let payload = &bytes[10..];
-    assert_eq!(payload.len(), 18);
-    assert_eq!(&payload[0..2], &(NV_ITEM_IMEI as u16).to_le_bytes()); // item
-    assert_eq!(&payload[2..4], &[0, 0]); // pad
-    assert_eq!(&payload[4..8], &10u32.to_le_bytes()); // data_len
-    assert_eq!(&payload[8..17], &[0x08, 0x0A, 0, 0, 0, 0, 0, 0, 0x81]); // NV 550
-    assert_eq!(payload[17], 0); // subscription
+    assert_eq!(&bytes[5..7], &527u16.to_le_bytes());
+    assert_eq!(bytes.len(), 7 + 527);
+    assert_eq!(&bytes[7..10], &[0x01, 2, 0]);
+    assert_eq!(&bytes[10..12], &(NV_ITEM_IMEI as u16).to_le_bytes());
+    assert_eq!(&bytes[12..15], &[0x02, 4, 0]);
+    assert_eq!(&bytes[15..19], &10u32.to_le_bytes());
+    assert_eq!(&bytes[19..22], &[0x03, 0x00, 0x02]); // length 512
+    let data = &bytes[22..];
+    assert_eq!(data.len(), message::WRITE_DATA_SIZE);
+    assert_eq!(&data[0..9], &[0x08, 0x0A, 0, 0, 0, 0, 0, 0, 0x81]); // NV 550
+    assert_eq!(data[9], 1); // subscription
+    assert!(data[10..].iter().all(|&b| b == 0));
 }
 
 /// Build a minimal QMI response frame for tests.
@@ -118,39 +124,62 @@ fn response_frame(msg_id: u16, txn: u16, tlvs: &[(u8, &[u8])]) -> Vec<u8> {
     frame
 }
 
-#[test]
-fn read_response_decodes_imei_from_data_tlv() {
-    let bcd = imei_a().to_nv550_bcd();
-    let frame = response_frame(
+/// A read reply as the modem sends it: TLV 0x01 u32 length, TLV 0x02 u8 NV
+/// status, TLV 0x03 the fixed 4096-byte data array.
+fn read_reply(txn: u16, status: u8, nv: &[u8]) -> Vec<u8> {
+    let mut data = nv.to_vec();
+    data.resize(4096, 0);
+    response_frame(
         message::MSG_NV_READ,
-        0x20,
-        &[(0x02, &[0, 0, 0, 0]), (0x01, &bcd)],
+        txn,
+        &[(0x01, &(nv.len() as u32).to_le_bytes()), (0x02, &[status]), (0x03, &data)],
+    )
+}
+
+#[test]
+fn read_response_decodes_a_provisioned_imei() {
+    let frame = read_reply(0x20, message::NV_DONE, &imei_a().to_nv550_bcd());
+    assert_eq!(frame.len(), message::MAX_DATAGRAM); // full-size, as on the phone
+    assert_eq!(message::parse_imei_read_response(&frame, 0x20).unwrap(), Some(imei_a()));
+}
+
+#[test]
+fn read_response_reports_never_written() {
+    // What the FP6 modem answered on 2026-10-05: length 0, status 5.
+    let frame = read_reply(0x20, message::NV_NOTACTIVE, &[]);
+    assert_eq!(message::parse_imei_read_response(&frame, 0x20).unwrap(), None);
+}
+
+#[test]
+fn read_response_rejects_other_status_short_data_and_bad_frames() {
+    let fail = read_reply(0x20, 4, &[]);
+    assert_eq!(
+        message::parse_imei_read_response(&fail, 0x20),
+        Err(message::MessageError::NvStatus(4))
     );
-    let decoded = message::parse_imei_read_response(&frame, 0x20).unwrap();
-    assert_eq!(decoded, imei_a());
+    let short = read_reply(0x20, message::NV_DONE, &imei_a().to_nv550_bcd()[..5]);
+    assert!(message::parse_imei_read_response(&short, 0x20).is_err());
+    let good = read_reply(0x20, message::NV_DONE, &imei_a().to_nv550_bcd());
+    assert!(message::parse_imei_read_response(&good, 0x21).is_err()); // transaction
+    let mut oversized = good.clone();
+    oversized.push(0);
+    assert!(message::parse_imei_read_response(&oversized, 0x20).is_err());
+    let no_status = response_frame(message::MSG_NV_READ, 0x20, &[(0x01, &[0, 0, 0, 0])]);
+    assert!(message::parse_imei_read_response(&no_status, 0x20).is_err());
 }
 
 #[test]
-fn read_response_rejects_failure_result() {
-    let frame = response_frame(message::MSG_NV_READ, 0x20, &[(0x02, &[1, 0, 2, 0])]);
-    assert!(message::parse_imei_read_response(&frame, 0x20).is_err());
-}
-
-#[test]
-fn read_response_rejects_wrong_transaction() {
-    let bcd = imei_a().to_nv550_bcd();
-    let frame = response_frame(
-        message::MSG_NV_READ,
-        0x20,
-        &[(0x02, &[0, 0, 0, 0]), (0x01, &bcd)],
+fn write_response_accepts_status_done_only() {
+    let reply = |status: u8| {
+        response_frame(
+            message::MSG_NV_WRITE,
+            5,
+            &[(0x01, &[0, 0, 0, 0]), (0x02, &[status]), (0x03, &[0u8; 512])],
+        )
+    };
+    assert!(message::parse_write_response(&reply(0), 5).is_ok());
+    assert_eq!(
+        message::parse_write_response(&reply(7), 5),
+        Err(message::MessageError::NvStatus(7))
     );
-    assert!(message::parse_imei_read_response(&frame, 0x21).is_err());
-}
-
-#[test]
-fn write_response_accepts_success_only() {
-    let ok = response_frame(message::MSG_NV_WRITE, 5, &[(0x02, &[0, 0, 0, 0])]);
-    assert!(message::parse_write_response(&ok, 5).is_ok());
-    let fail = response_frame(message::MSG_NV_WRITE, 5, &[(0x02, &[3, 0, 9, 0])]);
-    assert!(message::parse_write_response(&fail, 5).is_err());
 }

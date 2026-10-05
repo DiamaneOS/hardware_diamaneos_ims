@@ -31,11 +31,18 @@ pub struct Frame<'a> {
     body: &'a [u8],
 }
 impl<'a> Frame<'a> {
+    /// Parse a DCM datagram (at most MAX_DATAGRAM bytes).
     pub fn parse(bytes: &'a [u8]) -> Result<Self, Error> {
+        Self::parse_bounded(bytes, MAX_DATAGRAM)
+    }
+
+    /// Parse a datagram of another QMI service whose messages may be larger
+    /// (its own declared maximum plus the 7-byte header).
+    pub fn parse_bounded(bytes: &'a [u8], max_datagram: usize) -> Result<Self, Error> {
         if bytes.len() < 7 {
             return Err(Error::Truncated);
         }
-        if bytes.len() > MAX_DATAGRAM {
+        if bytes.len() > max_datagram {
             return Err(Error::Length);
         }
         let kind = match bytes[0] {

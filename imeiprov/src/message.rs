@@ -4,30 +4,50 @@
 //!
 //! Reverse-engineered from stock `tctd`:
 //! - service: QRTR service id 0x2ff, IDL v1 (`tct_get_service_object_internal_v01`
-//!   @0xfdfc; service object @0x13e30 = {lib 5, idl 1, service 0x2ff, max_msg 0x100e}).
-//! - NV read: message id 0x10, request = item id as a u32 (stock passes a 4-byte
-//!   request; `tct_nv_read_register` @0xfe1c, `qmi_client_send_msg_sync` @0x1003c).
-//! - NV write: message id 0x30, request = the `tct_nv_write_req_msg_v01` fields
-//!   (`imei_build` @0xb618, `start` @0xbdd0/0xbde0).
+//!   @0xfdfc; service object @0x13e30 = {lib 5, idl 1, service 0x2ff, max_msg 0x100e},
+//!   message counts {4 requests, 4 responses, 1 indication}).
+//! - Message layouts come from the IDL message table @0x126b8 (encoded TLV
+//!   descriptors @0x688a; each element is tag, type, struct offset, and for
+//!   arrays a fixed length). The service-table maximum lengths confirm them.
+//!   - NV read request (0x10): TLV 0x01 u32 item id.
+//!   - NV read response: TLV 0x01 u32 data length, TLV 0x02 u8 NV status,
+//!     TLV 0x03 u8[4096] data (fixed; max encoded 4110 bytes).
+//!   - NV write request (0x30): TLV 0x01 u16 item id, TLV 0x02 u32 data length,
+//!     TLV 0x03 u8[512] data (fixed; max encoded 527 bytes). Stock `imei_build`
+//!     @0xb618 fills the data with the 9-byte NV 550 value followed by the
+//!     subscription index, data length 10.
+//!   - NV write response: TLV 0x01 u32, TLV 0x02 u8 NV status, TLV 0x03 u8[512].
+//! - The service has no standard QMI result TLV: success is NV status 0
+//!   (NV_DONE_S). Status 5 (NV_NOTACTIVE_S) means the item was never written,
+//!   which is what an unprovisioned modem reports for NV 550.
 //!
-//! The framing is QMI-over-QRTR (no QMUX header), identical to the codec in
-//! `diamaneos_ims_dcm::protocol`, which this module reuses. The request payload
-//! is carried in the mandatory TLV 0x01; the response result is the standard
-//! TLV 0x02 {u16 result, u16 error}. The exact TLV wrapping of the *write*
-//! payload is the one field not provable offline; `--write` reads the value back
-//! and fails closed if the modem rejects it (see docs/imei-provisioning.md).
+//! The framing is QMI-over-QRTR (no QMUX header), the codec in
+//! `diamaneos_ims_dcm::protocol`, used here with this service's larger maximum.
 
 use crate::imei::{Imei, NV550_LEN, NV_ITEM_IMEI};
 use diamaneos_ims_dcm::protocol::{Encoder, Error as WireError, Frame, Kind};
 
 pub const MSG_NV_READ: u16 = 0x10;
 pub const MSG_NV_WRITE: u16 = 0x30;
-const TLV_PAYLOAD: u8 = 0x01;
-const TLV_RESULT: u8 = 0x02;
+/// Largest datagram the TCL service sends: its service object declares
+/// max_msg 0x100e bytes of TLVs (NV read replies use all of it), plus the
+/// 7-byte QMI header.
+pub const MAX_DATAGRAM: usize = 7 + 0x100e;
 
-/// Fixed field in `tct_nv_write_req_msg_v01` at offset 0x04 (`imei_build` 0xb64c:
-/// `mov w11,#0xa`). Reproduced verbatim; its exact meaning is not needed.
-const WRITE_DATA_LEN: u32 = 10;
+const TLV_ITEM: u8 = 0x01;
+const TLV_DATA_LEN: u8 = 0x02;
+const TLV_DATA: u8 = 0x03;
+const TLV_REPLY_LEN: u8 = 0x01;
+const TLV_REPLY_STATUS: u8 = 0x02;
+/// Fixed size of the write request's data array.
+pub const WRITE_DATA_SIZE: usize = 512;
+/// NV 550 value plus the subscription byte, as stock sends it.
+const WRITE_DATA_LEN: u32 = NV550_LEN as u32 + 1;
+
+/// NV status: done.
+pub const NV_DONE: u8 = 0;
+/// NV status: the item was never written.
+pub const NV_NOTACTIVE: u8 = 5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MessageError {
@@ -35,13 +55,12 @@ pub enum MessageError {
     Kind,
     MessageId,
     Transaction,
-    /// The modem returned QMI_RESULT_FAILURE; carries result/error codes only.
-    Result {
-        result: u16,
-        error: u16,
-    },
-    MissingResult,
-    MissingData,
+    /// A mandatory reply TLV is missing or has the wrong size.
+    MissingField(u8),
+    /// The modem answered with this NV status (not done, not "never written").
+    NvStatus(u8),
+    /// NV status done, but the data is not a valid NV 550 value.
+    BadData,
 }
 
 impl From<WireError> for MessageError {
@@ -50,11 +69,11 @@ impl From<WireError> for MessageError {
     }
 }
 
-/// Build the NV read request (message 0x10): one mandatory TLV 0x01 holding the
-/// item id as a little-endian u32.
+/// Build the NV read request (message 0x10): TLV 0x01, the item id as a
+/// little-endian u32.
 pub fn build_nv_read_request(txn: u16, item: u32) -> Result<Vec<u8>, MessageError> {
     let mut e = Encoder::new(Kind::Request, txn, MSG_NV_READ);
-    e.tlv(TLV_PAYLOAD, &item.to_le_bytes())?;
+    e.tlv(TLV_ITEM, &item.to_le_bytes())?;
     Ok(e.finish())
 }
 
@@ -63,35 +82,32 @@ pub fn build_imei_read_request(txn: u16) -> Result<Vec<u8>, MessageError> {
     build_nv_read_request(txn, NV_ITEM_IMEI)
 }
 
-/// Build the NV write request (message 0x30) for one subscription. The payload
-/// mirrors the meaningful prefix of `tct_nv_write_req_msg_v01`:
-///   u16 item | u16 pad | u32 data_len | u8 count(0x08) | u8 bcd[8] | u8 sub
-/// (offsets 0x00, 0x02, 0x04, 0x08, 0x09.., 0x11 in the stock struct).
+/// Build the NV write request (message 0x30) for one subscription: TLV 0x01
+/// u16 item 550, TLV 0x02 u32 data length 10, TLV 0x03 the 512-byte data array
+/// holding the NV 550 value and the subscription index.
 pub fn build_imei_write_request(
     txn: u16,
     imei: &Imei,
     subscription: u8,
 ) -> Result<Vec<u8>, MessageError> {
-    let bcd = imei.to_nv550_bcd();
-    let mut payload = Vec::with_capacity(18);
-    payload.extend_from_slice(&(NV_ITEM_IMEI as u16).to_le_bytes()); // 0x00
-    payload.extend_from_slice(&[0, 0]); // 0x02 pad
-    payload.extend_from_slice(&WRITE_DATA_LEN.to_le_bytes()); // 0x04
-    payload.extend_from_slice(&bcd); // 0x08: count byte + 8 BCD bytes
-    payload.push(subscription); // 0x11
+    let mut data = [0u8; WRITE_DATA_SIZE];
+    data[..NV550_LEN].copy_from_slice(&imei.to_nv550_bcd());
+    data[NV550_LEN] = subscription;
     let mut e = Encoder::new(Kind::Request, txn, MSG_NV_WRITE);
-    e.tlv(TLV_PAYLOAD, &payload)?;
+    e.tlv(TLV_ITEM, &(NV_ITEM_IMEI as u16).to_le_bytes())?;
+    e.tlv(TLV_DATA_LEN, &WRITE_DATA_LEN.to_le_bytes())?;
+    e.tlv(TLV_DATA, &data)?;
     Ok(e.finish())
 }
 
-/// Parse a response frame: check kind, message id and transaction, then the
-/// mandatory result TLV 0x02.
-fn parse_response<'a>(
+/// Parse a reply frame: check kind, message id and transaction, then return
+/// the frame and its NV status (TLV 0x02).
+fn parse_reply<'a>(
     bytes: &'a [u8],
     txn: u16,
     message_id: u16,
-) -> Result<Frame<'a>, MessageError> {
-    let frame = Frame::parse(bytes)?;
+) -> Result<(Frame<'a>, u8), MessageError> {
+    let frame = Frame::parse_bounded(bytes, MAX_DATAGRAM)?;
     if frame.kind != Kind::Response {
         return Err(MessageError::Kind);
     }
@@ -101,42 +117,36 @@ fn parse_response<'a>(
     if frame.txn != txn {
         return Err(MessageError::Transaction);
     }
-    let result = frame.tlv(TLV_RESULT).ok_or(MessageError::MissingResult)?;
-    if result.len() < 4 {
-        return Err(MessageError::Wire(WireError::Length));
+    match frame.tlv(TLV_REPLY_STATUS) {
+        Some([status]) => Ok((frame, *status)),
+        _ => Err(MessageError::MissingField(TLV_REPLY_STATUS)),
     }
-    let code = u16::from_le_bytes([result[0], result[1]]);
-    let err = u16::from_le_bytes([result[2], result[3]]);
-    if code != 0 {
-        return Err(MessageError::Result {
-            result: code,
-            error: err,
-        });
-    }
-    Ok(frame)
 }
 
-/// Parse an NV read response and decode the IMEI. The NV value lives in a data
-/// TLV; rather than assume its exact tag, scan every non-result TLV for a value
-/// that decodes as a valid NV 550 block (count byte 0x08 + identity nibble).
-pub fn parse_imei_read_response(bytes: &[u8], txn: u16) -> Result<Imei, MessageError> {
-    let frame = parse_response(bytes, txn, MSG_NV_READ)?;
-    for (tag, value) in frame.tlvs() {
-        if tag == TLV_RESULT {
-            continue;
-        }
-        // The data TLV may carry a small header before the NV bytes; try every
-        // window that starts a valid NV 550 block.
-        for start in 0..=value.len().saturating_sub(NV550_LEN) {
-            if let Ok(imei) = Imei::from_nv550_bcd(&value[start..]) {
-                return Ok(imei);
-            }
-        }
+/// Parse an NV read reply. `Ok(None)`: NV 550 was never written (the modem uses
+/// its placeholder). `Ok(Some(imei))`: the provisioned value.
+pub fn parse_imei_read_response(bytes: &[u8], txn: u16) -> Result<Option<Imei>, MessageError> {
+    let (frame, status) = parse_reply(bytes, txn, MSG_NV_READ)?;
+    match status {
+        NV_DONE => {}
+        NV_NOTACTIVE => return Ok(None),
+        other => return Err(MessageError::NvStatus(other)),
     }
-    Err(MessageError::MissingData)
+    let len = match frame.tlv(TLV_REPLY_LEN) {
+        Some(v) if v.len() == 4 => u32::from_le_bytes([v[0], v[1], v[2], v[3]]) as usize,
+        _ => return Err(MessageError::MissingField(TLV_REPLY_LEN)),
+    };
+    let data = frame.tlv(TLV_DATA).ok_or(MessageError::MissingField(TLV_DATA))?;
+    if len < NV550_LEN || len > data.len() {
+        return Err(MessageError::BadData);
+    }
+    Imei::from_nv550_bcd(&data[..NV550_LEN]).map(Some).map_err(|_| MessageError::BadData)
 }
 
-/// Parse an NV write response: only the result TLV matters.
+/// Parse an NV write reply: success is NV status 0.
 pub fn parse_write_response(bytes: &[u8], txn: u16) -> Result<(), MessageError> {
-    parse_response(bytes, txn, MSG_NV_WRITE).map(|_| ())
+    match parse_reply(bytes, txn, MSG_NV_WRITE)? {
+        (_, NV_DONE) => Ok(()),
+        (_, other) => Err(MessageError::NvStatus(other)),
+    }
 }

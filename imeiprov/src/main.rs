@@ -106,16 +106,25 @@ fn run() -> i32 {
     };
 
     let mut txn: u16 = 1;
-    let modem = read_modem_imei(&client, server, &mut txn);
-    match &modem {
-        Some(m) => info(&format!(
-            "modem: read_ok=true luhn_valid={} matches_slot1={} matches_slot2={}",
-            m.is_luhn_valid(),
-            *m == slot1,
-            *m == slot2
-        )),
-        None => info("modem: read_ok=false"),
-    }
+    let modem = match read_modem_imei(&client, server, &mut txn) {
+        Ok(Some(m)) => {
+            info(&format!(
+                "modem: read_ok=true provisioned=true luhn_valid={} matches_slot1={} matches_slot2={}",
+                m.is_luhn_valid(),
+                m == slot1,
+                m == slot2
+            ));
+            Some(m)
+        }
+        Ok(None) => {
+            info("modem: read_ok=true provisioned=false");
+            None
+        }
+        Err(e) => {
+            error(&format!("modem: read_ok=false reason={e}"));
+            return 1;
+        }
+    };
 
     if mode == Mode::Check {
         return 0;
@@ -126,8 +135,8 @@ fn run() -> i32 {
         error("write refused: traceability IMEIs did not validate");
         return 1;
     }
-    // Only write when the readable (default-subscription) value differs or could
-    // not be read. The stock read message carries no subscription selector, so
+    // Only write after a successful read, when NV 550 is unprovisioned or differs
+    // from slot 1. The stock read message carries no subscription selector, so
     // slot 2 is provisioned alongside slot 1 and confirmed on the phone (*#06#).
     let need_write = !matches!(&modem, Some(m) if *m == slot1);
     if !need_write {
@@ -137,11 +146,11 @@ fn run() -> i32 {
 
     let sub0_ok = write_slot(&client, server, &slot1, 0, &mut txn);
     let sub1_ok = write_slot(&client, server, &slot2, 1, &mut txn);
-    let verify_ok = matches!(read_modem_imei(&client, server, &mut txn), Some(m) if m == slot1);
+    let verify_ok = matches!(read_modem_imei(&client, server, &mut txn), Ok(Some(m)) if m == slot1);
     info(&format!(
         "write: sub0_ok={sub0_ok} sub1_ok={sub1_ok} verify_slot1={verify_ok}"
     ));
-    if sub0_ok && verify_ok {
+    if sub0_ok && sub1_ok && verify_ok {
         0
     } else {
         1
@@ -157,24 +166,65 @@ fn parse_mode() -> Option<Mode> {
     }
 }
 
-fn read_modem_imei(client: &Client, server: client::Peer, txn: &mut u16) -> Option<Imei> {
+/// Why a modem NV read failed. Carries error kinds and NV status codes only,
+/// never NV contents.
+enum ReadFail {
+    Build,
+    Transport(std::io::ErrorKind),
+    NoReply,
+    Parse(message::MessageError),
+}
+
+impl std::fmt::Display for ReadFail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReadFail::Build => f.write_str("build"),
+            ReadFail::Transport(kind) => write!(f, "transport:{kind:?}"),
+            ReadFail::NoReply => f.write_str("no_reply"),
+            ReadFail::Parse(e) => write!(f, "parse:{e:?}"),
+        }
+    }
+}
+
+/// Read NV 550. `Ok(None)` means the item was never written.
+fn read_modem_imei(
+    client: &Client,
+    server: client::Peer,
+    txn: &mut u16,
+) -> Result<Option<Imei>, ReadFail> {
     let id = next_txn(txn);
-    let request = message::build_imei_read_request(id).ok()?;
+    let request = message::build_imei_read_request(id).map_err(|_| ReadFail::Build)?;
     let response = client
         .transact(server, &request, RPC_TIMEOUT, RPC_TRIES)
-        .ok()??;
-    message::parse_imei_read_response(&response, id).ok()
+        .map_err(|e| ReadFail::Transport(e.kind()))?
+        .ok_or(ReadFail::NoReply)?;
+    message::parse_imei_read_response(&response, id)
+        .map_err(ReadFail::Parse)
 }
 
 fn write_slot(client: &Client, server: client::Peer, imei: &Imei, sub: u8, txn: &mut u16) -> bool {
     let id = next_txn(txn);
     let Ok(request) = message::build_imei_write_request(id, imei, sub) else {
+        error(&format!("write sub{sub}: request not built"));
         return false;
     };
-    let Ok(Some(response)) = client.transact(server, &request, RPC_TIMEOUT, RPC_TRIES) else {
-        return false;
-    };
-    message::parse_write_response(&response, id).is_ok()
+    match client.transact(server, &request, RPC_TIMEOUT, RPC_TRIES) {
+        Ok(Some(response)) => match message::parse_write_response(&response, id) {
+            Ok(()) => true,
+            Err(e) => {
+                error(&format!("write sub{sub}: {e:?}"));
+                false
+            }
+        },
+        Ok(None) => {
+            error(&format!("write sub{sub}: no reply"));
+            false
+        }
+        Err(e) => {
+            error(&format!("write sub{sub}: transport {:?}", e.kind()));
+            false
+        }
+    }
 }
 
 fn next_txn(txn: &mut u16) -> u16 {

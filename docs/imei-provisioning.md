@@ -50,10 +50,16 @@ reports failure) rather than leaving a bad value.
 
 - Service: QRTR service id `0x2ff`, QMI IDL v1 (the Fairphone TCL "TCT_QMI"
   service).
-- NV read: QMI message `0x10`, request carries the NV item id (550) in the
-  mandatory TLV `0x01`; the response's result is the standard TLV `0x02`.
-- NV write: QMI message `0x30`, request carries the NV write payload in the
-  mandatory TLV `0x01`.
+- Message layouts come from the stock binary's QMI IDL message table; the
+  service has no standard QMI result TLV, and success is NV status 0.
+  - NV read (`0x10`): request TLV `0x01` u32 item id (550). Reply TLV `0x01`
+    u32 data length, TLV `0x02` u8 NV status, TLV `0x03` u8[4096] data. Status 5
+    (NV_NOTACTIVE) means the item was never written.
+  - NV write (`0x30`): request TLV `0x01` u16 item id, TLV `0x02` u32 data
+    length (10), TLV `0x03` u8[512] data: the 9-byte NV 550 value, then the
+    subscription index (0 or 1). Reply TLV `0x02` u8 NV status.
+- Replies use the service's full maximum message size (4110 bytes of TLVs), so
+  the receive buffer is 8 KiB and a larger datagram is reported, not truncated.
 - NV 550 value: 9 bytes, `[0x08][(d1<<4)|0x0A][(d3<<4)|d2]...[(d15<<4)|d14]`
   (the standard Qualcomm NV_UE_IMEI BCD layout).
 
@@ -69,17 +75,18 @@ Luhn digits). Run with the repository host tests (`./tests/run-host-tests.sh`).
 
 ## Verifying on a phone (dry run)
 
-With the shipped `--check` configuration:
+With `--check`:
 
 1. Boot the device; the service runs once after persistent properties are ready.
 2. Read the result: `adb logcat -d -s imeiprovd` (or run it on demand as root on
    a userdebug build: `adb shell su 0 /vendor/bin/imeiprovd --check`).
 3. Expected before provisioning:
    - `trace: slot1_valid=true slot2_valid=true distinct=true`
-   - `modem: read_ok=true luhn_valid=false matches_slot1=false matches_slot2=false`
+   - `modem: read_ok=true provisioned=false`
 
    This proves the traceability decode/validate and the modem NV read both work,
-   and that the modem still holds the unprovisioned value. After `--write` is
-   enabled and the device reboots, `--check` shows
-   `modem: read_ok=true luhn_valid=true matches_slot1=true`, and `*#06#` shows
-   the real IMEIs on both slots.
+   and that NV 550 was never written (the modem then reports Qualcomm's
+   placeholder IMEI). After a `--write` run and a reboot, `--check` shows
+   `modem: read_ok=true provisioned=true luhn_valid=true matches_slot1=true`,
+   and `*#06#` shows the real IMEIs on both slots. A failed read logs
+   `read_ok=false reason=...` with the error kind or NV status only.
