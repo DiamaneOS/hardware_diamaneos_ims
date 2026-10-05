@@ -35,7 +35,7 @@ reports failure) rather than leaving a bad value.
 
 ## Privileges
 
-- Dedicated vendor user/group `vendor_imeiprov` (UID/GID 2992, `config.fs`), no
+- Dedicated vendor user/group `vendor_imeiprov` (UID/GID 2994, `config.fs`), no
   supplementary groups, no capabilities.
 - SELinux domain `diamaneos_imeiprov`: a QRTR socket, read-only access to the
   traceability block device (`vendor_traceability_block_device`), and the

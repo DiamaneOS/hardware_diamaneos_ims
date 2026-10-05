@@ -26,7 +26,7 @@ const SERVICE_ID: u32 = 0x2ff;
 /// Stock does not filter by instance; 0 matches the modem's advertised service.
 const SERVICE_INSTANCE: u32 = 0;
 /// Dedicated vendor UID (config.fs). Root is allowed only for lab dry-runs.
-const EXPECTED_UID: u32 = 2992;
+const EXPECTED_UID: u32 = 2994;
 
 const LOOKUP_TIMEOUT: Duration = Duration::from_secs(60);
 const RPC_TIMEOUT: Duration = Duration::from_secs(2);
