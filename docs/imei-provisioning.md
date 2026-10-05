@@ -23,14 +23,21 @@ other identifier.
 
 ## Modes
 
-- `--check` (the shipped configuration): decode, validate and compare; never
-  writes. The init service (`imeiprovd.rc`) runs `imeiprovd --check`.
-- `--write`: as `--check`, then provision the differing NV items and verify.
+- `--check`: decode, validate and compare; never writes. For dry runs
+  (`adb shell su 0 /vendor/bin/imeiprovd --check` on a userdebug build).
+- `--write`: the shipped configuration; `imeiprovd.rc` runs it once per boot.
+  As `--check`, then, only after a successful read shows NV 550 unprovisioned or
+  different from slot 1, provisions both subscriptions and reads back.
+  - Refuses to write unless both traceability IMEIs are 15 digits, pass the Luhn
+    check and differ.
+  - A failed write or read-back is logged and the tool exits non-zero. It does
+    not retry until the next boot.
 
-Writing is enabled by changing the single argument in `imeiprovd.rc` from
-`--check` to `--write`. `--write` fails closed: if validation fails, or the
-modem rejects the write, or the read-back does not match, it writes nothing (or
-reports failure) rather than leaving a bad value.
+Why every boot: activating a slot (`fastboot --set-active`, and every OTA)
+makes the bootloader restore the modem file system from its golden copy (fsg),
+which holds no IMEI, so NV 550 is unprovisioned again. Seen on the FP6 on
+2026-10-05; a plain reboot or a bootloader round trip keeps it. Stock `tctd`
+writes the IMEIs at every boot for the same reason.
 
 ## Privileges
 
@@ -72,12 +79,10 @@ Luhn digits). It runs with the host tests (`./tests/run-host-tests.sh`).
 
 ## Checking on a phone
 
-With `--check`:
-
-1. Boot the device; the service runs once after persistent properties are ready.
-2. Read the result: `adb logcat -d -s imeiprovd` (or run it on demand as root on
-   a userdebug build: `adb shell su 0 /vendor/bin/imeiprovd --check`).
-3. Expected before provisioning:
+1. Boot the phone; the service runs once after persistent properties are ready.
+2. Read the result: `adb logcat -d -s imeiprovd`. Or run a dry run as root on a
+   userdebug build: `adb shell su 0 /vendor/bin/imeiprovd --check`.
+3. Before provisioning, `--check` shows:
    - `trace: slot1_valid=true slot2_valid=true distinct=true`
    - `modem: read_ok=true provisioned=false`
 
