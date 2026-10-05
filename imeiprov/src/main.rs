@@ -65,12 +65,13 @@ fn run() -> i32 {
     // Read and validate the traceability IMEIs (read-only).
     let (slot1, slot2) = match trace::read_imeis(trace::PATH) {
         Ok(pair) => pair,
-        Err(trace::Error::Io(_)) => {
-            error("traceability read failed");
+        Err(trace::Error::Io(e)) => {
+            error(&format!("traceability read failed: {:?}", e.kind()));
             return 1;
         }
-        Err(trace::Error::Decode(_)) => {
-            error("traceability IMEI not 15 ASCII digits");
+        Err(trace::Error::Decode(e)) => {
+            // The error is a bare variant (Length, NotDigit, ...) and carries no digits.
+            error(&format!("traceability IMEI invalid: {e:?}"));
             return 1;
         }
     };
