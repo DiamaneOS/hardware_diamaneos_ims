@@ -1,10 +1,4 @@
-# Verification and release limits
-
-Host checks exercise the DCM codec and connection state machine, emergency
-capacity and selection, unavailable Wi-Fi profile handling, transaction/peer
-fences, bounded retries, stale callback rejection, address eligibility and broker
-network replacement. Run `tests/run-host-tests.sh`; use the resulting report for
-case counts. These tests place no calls, send no SMS and contact no endpoints.
+# Verification and limits
 
 The ordinary Qualcomm IMS service owns signalling, voice, Wi-Fi calling and
 carrier emergency location. This component provides restricted data

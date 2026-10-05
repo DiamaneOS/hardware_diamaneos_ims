@@ -13,6 +13,19 @@ mkdir -p tests/out/broker-core
     tests/java/de/diamaneos/imsbroker/NetworkStateTest.java
 "$JAVA" -cp tests/out/broker-core de.diamaneos.imsbroker.NetworkStateTest
 
+# The real broker classes against host-only Android fixtures (tests/stubs).
+mkdir -p tests/out/broker-emergency
+"$JAVAC" -Xlint:all -Werror -d tests/out/broker-emergency \
+    $(find tests/stubs -name '*.java' | sort) \
+    common/src/de/diamaneos/ims/AddressPolicy.java \
+    broker/src/de/diamaneos/imsbroker/Addresses.java \
+    broker/src/de/diamaneos/imsbroker/NetworkState.java \
+    broker/src/de/diamaneos/imsbroker/PdnTracker.java \
+    broker/src/de/diamaneos/imsbroker/DcmConnection.java \
+    broker/src/de/diamaneos/imsbroker/PdnBroker.java \
+    tests/java/de/diamaneos/imsbroker/EmergencyBrokerTest.java
+"$JAVA" -cp tests/out/broker-emergency de.diamaneos.imsbroker.EmergencyBrokerTest
+
 mkdir -p tests/out/address-policy
 "$JAVAC" -Xlint:all -Werror -d tests/out/address-policy \
     tests/stubs/android/system/OsConstants.java \
