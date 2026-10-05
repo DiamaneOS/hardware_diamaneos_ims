@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The DiamaneOS Project
+#
+# Platform lifecycle gate (system_ext): vendor init cannot trigger on
+# persistent-properties readiness, so the one-shot start lives here (as for
+# imsdcmd). This fires before the modem is necessarily up; imeiprovd itself
+# waits, with a bounded timeout, for the TCL QMI service to appear on QRTR.
+on property:ro.persistent_properties.ready=true
+    start vendor.imeiprovd

@@ -36,6 +36,26 @@ rust_test_host {
     rustlibs: ["libdiamaneos_ims_dcm"],
     test_options: { unit_test: true },
 }
+// IMEI provisioning: pure decode/validate/codec library (host-testable) and the
+// one-shot vendor binary that reads the traceability partition and writes modem
+// NV 550 over the TCL QMI service. See finding -171 and docs/imei-provisioning.md.
+rust_library {
+    name: "libdiamaneos_imeiprov", crate_name: "diamaneos_imeiprov",
+    srcs: ["imeiprov/src/lib.rs"], edition: "2021", vendor_available: true,
+    host_supported: true,
+    rustlibs: ["libdiamaneos_ims_dcm"],
+}
+rust_binary {
+    name: "imeiprovd", srcs: ["imeiprov/src/main.rs"], edition: "2021", vendor: true,
+    rustlibs: ["liblibc", "libdiamaneos_ims_dcm", "libdiamaneos_imeiprov"],
+    shared_libs: ["liblog"],
+    required: ["imeiprovd.rc", "imeiprovd-control.rc"],
+}
+rust_test_host {
+    name: "DiamaneOSImeiProvHostTests", srcs: ["imeiprov/tests/decode.rs"], edition: "2021",
+    rustlibs: ["libdiamaneos_imeiprov"],
+    test_options: { unit_test: true },
+}
 rust_library {
     name: "libdiamaneos_wlan_reporting", crate_name: "diamaneos_wlan_reporting",
     srcs: ["wlan/src/lib.rs"], edition: "2021", host_supported: true,

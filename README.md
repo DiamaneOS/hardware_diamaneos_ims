@@ -22,6 +22,10 @@ remain subject to the verification limits in [verification](docs/verification.md
 - `wlan-observer/`: passive observations of the connected Wi-Fi link, with no
   Internet, location or phone-state permission.
 - `integration/`: emergency-APN comparison tooling and source IWLAN provenance.
+- `imeiprov/`: one-shot IMEI provisioning (`imeiprovd`): reads the read-only
+  traceability partition and writes modem NV 550 over the Fairphone TCL QMI
+  service, with a dedicated vendor UID and SELinux domain. See
+  [IMEI provisioning](docs/imei-provisioning.md).
 
 VoWiFi integration is described in [Wi-Fi calling](docs/wifi-calling.md).
 The device-selected [Wi-Fi reporter](docs/wlan-reporting-design.md) separates

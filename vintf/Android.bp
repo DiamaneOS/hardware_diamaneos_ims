@@ -28,3 +28,21 @@ prebuilt_etc {
     sub_dir: "init",
     system_ext_specific: true,
 }
+
+// Init glue of the one-shot IMEI provisioning tool (imeiprovd). The vendor rc
+// defines the service; the system_ext control rc starts it, since vendor init
+// cannot gate on persistent-properties readiness. The vendor user is a device
+// make variable (TARGET_FS_CONFIG_GEN, config.fs).
+prebuilt_etc {
+    name: "imeiprovd.rc",
+    src: "imeiprovd.rc",
+    sub_dir: "init",
+    vendor: true,
+}
+
+prebuilt_etc {
+    name: "imeiprovd-control.rc",
+    src: "imeiprovd-control.rc",
+    sub_dir: "init",
+    system_ext_specific: true,
+}

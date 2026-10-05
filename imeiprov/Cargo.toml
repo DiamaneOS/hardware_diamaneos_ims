@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: Apache-2.0
+[package]
+name = "diamaneos-imeiprov"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+# The binary (src/main.rs) and its Linux-only modules (client, trace, seccomp)
+# are built by Soong (Android.bp), not by cargo. Host cargo builds only the
+# pure library (imei, message) and its tests.
+autobins = false
+
+[lib]
+name = "diamaneos_imeiprov"
+path = "src/lib.rs"
+
+[dependencies]
+diamaneos-ims-dcm = { path = "../dcm" }
+libc = "=0.2.174"

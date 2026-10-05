@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The DiamaneOS Project
+#
+# One-shot IMEI provisioning (finding -171). Reads the read-only traceability
+# partition, validates both IMEIs and compares them with the modem's current
+# NV 550 value. This build runs --check only: it logs booleans to logcat (tag
+# imeiprovd) and never prints an identifier, never writes NV, sets no property
+# and opens no non-QRTR socket. Writing is enabled later by the main session by
+# changing the single argument below to --write, after the phone dry-run
+# (see docs/imei-provisioning.md).
+#
+# - Own vendor user/group (config.fs), no supplementary groups, no capabilities
+#   (an empty capabilities list drops them all for a non-root user).
+# - oneshot: runs once per boot and exits; init does not restart it.
+# - disabled, started only by the system_ext trigger in imeiprovd-control.rc,
+#   because a vendor init trigger cannot gate on persistent-properties readiness.
+service vendor.imeiprovd /vendor/bin/imeiprovd --check
+    class main
+    user vendor_imeiprov
+    group vendor_imeiprov
+    capabilities
+    oneshot
+    disabled
