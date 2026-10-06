@@ -41,5 +41,32 @@ service vendor.imeiprovd-bt /vendor/bin/imeiprovd --bt-address
     oneshot
     disabled
 
+# Factory Wi-Fi MAC (finding -180). Reads the 6 MAC bytes from the
+# traceability partition, validates them and writes the WLAN driver's MAC file,
+# in stock's format, to a RAM-backed tree only this domain may write. The
+# device's ueventd.rc lists /mnt/vendor/wlan_mac/ as a firmware directory, so
+# ueventd serves the file when the QCA6750 driver asks for
+# wlan/qca_cld/qca6750/wlan_mac.bin at probe (after early-boot starts the
+# Wi-Fi processor). Stock copies the MAC to persist from a late_start script
+# instead, so a new MAC reaches its driver only at the next boot. A missing or
+# invalid MAC writes nothing and logs only "wlan mac: missing" or "wlan mac:
+# invalid"; the MAC is never logged. Same user, group and domain as above; no
+# capabilities. exec_start: init waits for it (one 6-byte read and one small
+# write), so the file exists before early-boot.
+service vendor.imeiprovd-wlan /vendor/bin/imeiprovd --wlan-mac
+    class main
+    user vendor_imeiprov
+    group vendor_imeiprov
+    capabilities
+    oneshot
+    disabled
+
 on post-fs
     start vendor.imeiprovd-bt
+    # The firmware tree (vendor_diamaneos_wlan_mac_file): root's, searchable by
+    # imeiprovd's group; only the last directory is imeiprovd's to write.
+    mkdir /mnt/vendor/wlan_mac 0710 root vendor_imeiprov
+    mkdir /mnt/vendor/wlan_mac/wlan 0710 root vendor_imeiprov
+    mkdir /mnt/vendor/wlan_mac/wlan/qca_cld 0710 root vendor_imeiprov
+    mkdir /mnt/vendor/wlan_mac/wlan/qca_cld/qca6750 0700 vendor_imeiprov vendor_imeiprov
+    exec_start vendor.imeiprovd-wlan

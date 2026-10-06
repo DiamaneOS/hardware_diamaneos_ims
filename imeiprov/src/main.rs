@@ -8,12 +8,15 @@
 //! reading back. With `--bt-address` it instead reads the factory Bluetooth
 //! address from the same partition, validates it and sets it in one property
 //! (`ro.vendor.diamaneos.bt.factory_address`), which only this domain may set;
-//! the IMEI modes set no property. It opens no non-QRTR sockets (besides the log
-//! and property sockets), writes no MAC or region data, and logs only booleans
-//! and counters -- never an identifier.
+//! the IMEI modes set no property. With `--wlan-mac` it reads the factory Wi-Fi
+//! MAC, validates it and writes the WLAN driver's MAC file to a RAM-backed path
+//! only this domain may write ([`WLAN_MAC_FILE`]). It opens no non-QRTR sockets
+//! (besides the log and property sockets), writes no region data and no
+//! persistent file, and logs only booleans and counters -- never an identifier.
 //!
 //! Protocol and partition facts are documented in `src/message.rs`, `src/imei.rs`,
-//! `src/bdaddr.rs` and `src/trace.rs` (reverse-engineered from stock `tctd`).
+//! `src/bdaddr.rs`, `src/wlanmac.rs` and `src/trace.rs` (reverse-engineered from
+//! stock `tctd` and `setwlanmac.sh`).
 
 mod client;
 mod seccomp;
@@ -23,6 +26,9 @@ use client::Client;
 use diamaneos_imeiprov::bdaddr::BdAddr;
 use diamaneos_imeiprov::imei::{check_pair, Imei};
 use diamaneos_imeiprov::message;
+use diamaneos_imeiprov::wlanmac::WlanMac;
+use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 use std::time::Duration;
 
 /// QRTR service id of the Fairphone TCL QMI service (TCT_QMI), from the stock
@@ -38,6 +44,12 @@ const EXPECTED_UID: u32 = 2994;
 /// implementation reads.
 const BT_ADDRESS_PROPERTY: &str = "ro.vendor.diamaneos.bt.factory_address";
 
+/// Written once per boot by `--wlan-mac`. The tree is in RAM (tmpfs), created
+/// by init before this runs (`imeiprovd.rc`); the device's ueventd.rc lists
+/// `/mnt/vendor/wlan_mac/` as a firmware directory, so ueventd serves this file
+/// when the driver asks for `wlan/qca_cld/qca6750/wlan_mac.bin`.
+const WLAN_MAC_FILE: &str = "/mnt/vendor/wlan_mac/wlan/qca_cld/qca6750/wlan_mac.bin";
+
 const LOOKUP_TIMEOUT: Duration = Duration::from_secs(60);
 const RPC_TIMEOUT: Duration = Duration::from_secs(2);
 const RPC_TRIES: u32 = 3;
@@ -47,6 +59,7 @@ enum Mode {
     Check,
     Write,
     BtAddress,
+    WlanMac,
 }
 
 fn main() {
@@ -57,7 +70,7 @@ fn run() -> i32 {
     let mode = match parse_mode() {
         Some(m) => m,
         None => {
-            error("usage: imeiprovd --check | --write | --bt-address");
+            error("usage: imeiprovd --check | --write | --bt-address | --wlan-mac");
             return 2;
         }
     };
@@ -75,6 +88,9 @@ fn run() -> i32 {
 
     if mode == Mode::BtAddress {
         return provide_bt_address();
+    }
+    if mode == Mode::WlanMac {
+        return provide_wlan_mac();
     }
 
     // Read and validate the traceability IMEIs (read-only).
@@ -178,6 +194,7 @@ fn parse_mode() -> Option<Mode> {
         [a] if a == "--check" => Some(Mode::Check),
         [a] if a == "--write" => Some(Mode::Write),
         [a] if a == "--bt-address" => Some(Mode::BtAddress),
+        [a] if a == "--wlan-mac" => Some(Mode::WlanMac),
         _ => None,
     }
 }
@@ -204,6 +221,46 @@ fn provide_bt_address() -> i32 {
         error("bt address: property not set");
         1
     }
+}
+
+/// `--wlan-mac`: read the factory Wi-Fi MAC (6 bytes, read-only), validate it
+/// and write the driver's MAC file ([`WLAN_MAC_FILE`]). If it is missing or
+/// invalid, no file is written and the driver uses its firmware's address, as
+/// before. The file is created new (never replaced, never through a link),
+/// readable by its owner only (ueventd reads it with its own capabilities) and
+/// never read back here. Logs the outcome only, never the MAC. No seccomp
+/// filter, as for `--bt-address`; SELinux confines it.
+fn provide_wlan_mac() -> i32 {
+    let Ok(raw) = trace::read_wlan_mac(trace::PATH) else {
+        warn("wlan mac: missing");
+        return 1;
+    };
+    let Ok(mac) = WlanMac::from_trace(&raw) else {
+        warn("wlan mac: invalid");
+        return 1;
+    };
+    match write_new_file(WLAN_MAC_FILE, mac.mac_file().as_bytes()) {
+        Ok(()) => {
+            info("wlan mac: written");
+            0
+        }
+        Err(e) => {
+            error(&format!("wlan mac: file not written: {:?}", e.kind()));
+            1
+        }
+    }
+}
+
+/// Create `path` (it must not exist; O_EXCL also refuses a symbolic link),
+/// mode 0400, and write `contents`.
+fn write_new_file(path: &str, contents: &[u8]) -> std::io::Result<()> {
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o400)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(path)?;
+    file.write_all(contents)
 }
 
 /// Why a modem NV read failed. Carries error kinds and NV status codes only,

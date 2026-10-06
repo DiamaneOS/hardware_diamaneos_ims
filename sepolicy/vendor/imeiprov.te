@@ -6,13 +6,15 @@
 # It reads the two IMEIs from the read-only traceability partition and, in
 # --write mode, provisions modem NV 550 over the Fairphone TCL QMI service
 # (QRTR service 0x2ff). In --bt-address mode (finding -177) it reads the factory
-# Bluetooth address from the same partition and sets one property. It replaces
-# the modem-NV and Bluetooth-address parts of stock `tctd`; it writes no
-# MAC/region data and opens no non-QRTR socket besides the property socket.
+# Bluetooth address from the same partition and sets one property; in
+# --wlan-mac mode it reads the factory Wi-Fi MAC and writes the WLAN driver's
+# MAC file into a RAM-backed tree. It replaces the modem-NV and address parts
+# of stock `tctd` (and stock's setwlanmac.sh); it writes no region data, no
+# persistent file, and opens no non-QRTR socket besides the property socket.
 #
 # It gets exactly: a QRTR socket, read-only access to the traceability block
-# device, the SELinux enforce flag it checks before running, and setting its
-# one Bluetooth address property. Nothing else.
+# device, the SELinux enforce flag it checks before running, setting its one
+# Bluetooth address property and creating the Wi-Fi MAC file. Nothing else.
 type diamaneos_imeiprov, domain;
 type diamaneos_imeiprov_exec, exec_type, vendor_file_type, file_type;
 init_daemon_domain(diamaneos_imeiprov)
@@ -33,6 +35,15 @@ allow diamaneos_imeiprov selinuxfs:file r_file_perms;
 # --bt-address: set ro.vendor.diamaneos.bt.factory_address (property_contexts,
 # exact name), through the property socket. No other property.
 set_prop(diamaneos_imeiprov, vendor_diamaneos_bt_address_prop)
+
+# --wlan-mac: create /mnt/vendor/wlan_mac/wlan/qca_cld/qca6750/wlan_mac.bin
+# (file.te, file_contexts) new, write it once and close it. It walks /mnt
+# (tmpfs, searchable by every domain) and /mnt/vendor; it may not read the file
+# back, list, rename, replace or delete anything, or make directories (init
+# makes them, imeiprovd.rc).
+allow diamaneos_imeiprov mnt_vendor_file:dir search;
+allow diamaneos_imeiprov vendor_diamaneos_wlan_mac_file:dir { search write add_name };
+allow diamaneos_imeiprov vendor_diamaneos_wlan_mac_file:file { create open write };
 
 # --- least privilege, enforced by neverallow ---
 neverallow diamaneos_imeiprov self:global_capability_class_set *;
@@ -59,6 +70,32 @@ neverallow {
   -dumpstate
   -diamaneos_imeiprov
 } vendor_diamaneos_bt_address_prop:file { open read map };
+# Only imeiprovd creates or changes the Wi-Fi MAC file (init and vendor_init
+# may write most vendor files through platform policy). The device lets only
+# ueventd read it.
+neverallow {
+  domain
+  -init
+  -vendor_init
+  -diamaneos_imeiprov
+} vendor_diamaneos_wlan_mac_file:file { create write append link rename setattr relabelto };
+neverallow {
+  domain
+  -init
+  -vendor_init
+  -diamaneos_imeiprov
+} vendor_diamaneos_wlan_mac_file:dir { add_name remove_name rename reparent relabelto };
+# imeiprovd adds or removes names in no other directory (coredump_file and
+# method_trace_data_file: platform grants to every domain, see below), and may
+# not read, extend, rename, link, delete or change the attributes of the MAC
+# file.
+neverallow diamaneos_imeiprov {
+  file_type
+  -vendor_diamaneos_wlan_mac_file
+  -coredump_file
+  -method_trace_data_file
+}:dir { add_name remove_name };
+neverallow diamaneos_imeiprov vendor_diamaneos_wlan_mac_file:file { read map append unlink rename link setattr };
 # No persistent file writes. coredump_file (userdebug) and method_trace_data_file
 # (coverage builds) are granted to every domain by the platform policy.
 neverallow diamaneos_imeiprov {
