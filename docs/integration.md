@@ -1,43 +1,50 @@
 # Android integration
 
-Project-owned app IDs and the private WLAN Binder interface use `de.diamaneos`.
-Update the observer and reporter together: their Binder service name and
-generated interface packages must match. App package renames create new Android
-identities rather than migrating the old apps' data or permission state. Verify
-the new broker Network permission, system allowlists and SELinux app domains on
-the resulting image. Retained artifacts from earlier builds keep their original
-package names for reproducibility.
+- Project-owned app IDs and the private WLAN Binder interface use `de.diamaneos`.
+- Update the observer and reporter together: their Binder service name and
+  generated interface packages must match.
+- A renamed package is a new Android identity; the old app's data and
+  permission state do not migrate. Verify the broker's permission, system
+  allowlists and SELinux app domains on the resulting image.
+- Retained artifacts from earlier builds keep their original package names for
+  reproducibility.
 
-Work on an integration branch. Do not select this stack in a product merely
-because its host tests pass.
+## Steps
 
-1. Put this checkout at `hardware/diamaneos/ims`. Confirm the existing modem IMS
-   service and call-audio path remain present. Remove competing DCM publishers
-   from the candidate; never run this daemon alongside another `0x302` server.
-2. Include `ims-board.mk` in the board configuration. Review the device-specific
-   QRTR domain inventory instead of copying another device's grants wholesale.
+Work on an integration branch. Passing host tests is no reason to select this
+stack in a product.
+
+1. Put this checkout at `hardware/diamaneos/ims`. Confirm the modem IMS service
+   and call-audio path are still present. Remove competing DCM publishers;
+   never run this daemon alongside another `0x302` server.
+2. Include `ims-board.mk` in the board configuration. Review the device's own
+   QRTR domain inventory instead of copying another device's grants.
 3. Set `DIAMANEOS_IMS_MODEM_NODE` from verified device topology and
-   `DIAMANEOS_IMS_SLOTS` from the product. Include `ims-product.mk`. It selects
-   emergency PDN service by default; nonpersistent kill switches are enabled only in debuggable builds and cannot
-   disable a later boot or user release.
-4. Build `imsdcmd`, `DiamaneOSImsBroker` and the policy with ordinary hardening and
-   neverallow checks enabled. AIDL V1 is frozen and hash-checked locally; the
+   `DIAMANEOS_IMS_SLOTS` from the product, and include `ims-product.mk`. It
+   selects emergency PDN service by default. Nonpersistent kill switches exist
+   only in debuggable builds and cannot disable a later boot or user release.
+4. Build `imsdcmd`, `DiamaneOSImsBroker` and the policy with ordinary hardening
+   and neverallow checks. AIDL V1 is frozen and hash-checked locally; the
    platform build must still run its native API compatibility checks.
 5. Compare emergency carrier options and APNs. The FP6 candidate uses the
    authenticated stock APN table intact, including IMS/EIMS and MVNO filters.
-   `integration/merge_emergency_apns.py` remains an optional comparison tool for
-   other integrations; review duplicate precedence and mixed-use rows before
-   adopting its output. It never installs or overwrites inputs.
+   For other integrations, `integration/merge_emergency_apns.py` is an optional
+   comparison tool; it never installs or overwrites inputs. Review duplicate
+   precedence and mixed-use rows before adopting its output.
 
 The AML app and framework event patch in
 [platform_packages_apps_EmergencyLocation](https://github.com/DiamaneOS/platform_packages_apps_EmergencyLocation)
-are not part of DiamaneOS. Do not include them as prerequisites of IMS. Wi-Fi calling uses the separate
-[IWLAN integration](wifi-calling.md).
+are not part of DiamaneOS and not IMS prerequisites. Wi-Fi calling uses the
+separate [IWLAN integration](wifi-calling.md).
 
-Full image gates include VINTF, UID collision checks, ELF dependencies, enforcing
-SELinux, and a native seccomp smoke test. Normal carrier tests must cover both
-SIMs, incoming/outgoing voice, mobile data disabled, non-default data SIM,
-re-registration, IMS service restart, and call audio. Emergency radio fallback,
-no-SIM routing, PSAP callback, RTT and carrier emergency-location behavior cannot be established
-by host simulation alone. Record simulated results separately from
-carrier/device observations. AML qualification is outside this repository.
+## Tests
+
+- Full image gates: VINTF, UID collisions, ELF dependencies, enforcing SELinux,
+  a native seccomp smoke test.
+- Normal carrier tests must cover both SIMs, incoming/outgoing voice, mobile data
+  off, a non-default data SIM, re-registration, IMS service restart and call
+  audio.
+- Host simulation alone cannot establish emergency radio fallback, no-SIM
+  routing, PSAP callback, RTT or carrier emergency location. Record simulated
+  results separately from carrier/device observations.
+- AML qualification is outside this repository.
