@@ -24,9 +24,11 @@ carrier behavior: see [verification](docs/verification.md).
   Internet, location or phone-state permission.
 - `integration/`: emergency-APN comparison tooling and source IWLAN provenance.
 - `imeiprov/`: one-shot [IMEI provisioning](docs/imei-provisioning.md)
-  (`imeiprovd`): reads the read-only traceability partition, writes modem NV 550
-  over the Fairphone TCL QMI service and, in a second mode, sets the factory
-  Bluetooth address property; own vendor UID and SELinux domain.
+  (`imeiprovd`), with its own vendor UID and SELinux domain.
+  - Reads the read-only traceability partition and writes modem NV 550 over
+    the Fairphone TCL QMI service.
+  - In other modes, sets the factory Bluetooth address property and writes the
+    WLAN driver's factory MAC file.
 
 ## Wi-Fi calling
 
