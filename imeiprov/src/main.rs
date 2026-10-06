@@ -5,17 +5,22 @@
 //! Reads the two IMEIs from the read-only `traceability` partition, validates
 //! them, and compares them with the modem's current NV value. With `--write` it
 //! provisions the modem's NV item 550 over the TCL QMI service and verifies by
-//! reading back. It sets no properties, opens no non-QRTR sockets, writes no MAC
-//! or region data, and logs only booleans and counters -- never an identifier.
+//! reading back. With `--bt-address` it instead reads the factory Bluetooth
+//! address from the same partition, validates it and sets it in one property
+//! (`ro.vendor.diamaneos.bt.factory_address`), which only this domain may set;
+//! the IMEI modes set no property. It opens no non-QRTR sockets (besides the log
+//! and property sockets), writes no MAC or region data, and logs only booleans
+//! and counters -- never an identifier.
 //!
-//! Protocol and partition facts are documented in `src/message.rs`, `src/imei.rs`
-//! and `src/trace.rs` (reverse-engineered from stock `tctd`).
+//! Protocol and partition facts are documented in `src/message.rs`, `src/imei.rs`,
+//! `src/bdaddr.rs` and `src/trace.rs` (reverse-engineered from stock `tctd`).
 
 mod client;
 mod seccomp;
 mod trace;
 
 use client::Client;
+use diamaneos_imeiprov::bdaddr::BdAddr;
 use diamaneos_imeiprov::imei::{check_pair, Imei};
 use diamaneos_imeiprov::message;
 use std::time::Duration;
@@ -28,6 +33,11 @@ const SERVICE_INSTANCE: u32 = 0;
 /// Dedicated vendor UID (config.fs). Root is allowed only for lab dry-runs.
 const EXPECTED_UID: u32 = 2994;
 
+/// Set once per boot by `--bt-address` (ro.: init refuses any later change).
+/// The device's Bluetooth init rc copies it to the property its HCI
+/// implementation reads.
+const BT_ADDRESS_PROPERTY: &str = "ro.vendor.diamaneos.bt.factory_address";
+
 const LOOKUP_TIMEOUT: Duration = Duration::from_secs(60);
 const RPC_TIMEOUT: Duration = Duration::from_secs(2);
 const RPC_TRIES: u32 = 3;
@@ -36,6 +46,7 @@ const RPC_TRIES: u32 = 3;
 enum Mode {
     Check,
     Write,
+    BtAddress,
 }
 
 fn main() {
@@ -46,7 +57,7 @@ fn run() -> i32 {
     let mode = match parse_mode() {
         Some(m) => m,
         None => {
-            error("usage: imeiprovd --check | --write");
+            error("usage: imeiprovd --check | --write | --bt-address");
             return 2;
         }
     };
@@ -60,6 +71,10 @@ fn run() -> i32 {
     if !selinux_enforcing() {
         error("refusing to run without enforcing SELinux");
         return 1;
+    }
+
+    if mode == Mode::BtAddress {
+        return provide_bt_address();
     }
 
     // Read and validate the traceability IMEIs (read-only).
@@ -162,7 +177,32 @@ fn parse_mode() -> Option<Mode> {
     match args.as_slice() {
         [a] if a == "--check" => Some(Mode::Check),
         [a] if a == "--write" => Some(Mode::Write),
+        [a] if a == "--bt-address" => Some(Mode::BtAddress),
         _ => None,
+    }
+}
+
+/// `--bt-address`: read the factory Bluetooth address (6 bytes, read-only),
+/// validate it and set [`BT_ADDRESS_PROPERTY`]. If it is missing or invalid,
+/// nothing is set and the HCI implementation keeps its stored or generated
+/// address, as before. Logs the outcome only, never the address. No seccomp
+/// filter: the process reads one window of a root-owned partition, makes one
+/// property call and exits; SELinux confines it.
+fn provide_bt_address() -> i32 {
+    let Ok(raw) = trace::read_bt_address(trace::PATH) else {
+        warn("bt address: missing");
+        return 1;
+    };
+    let Ok(address) = BdAddr::from_trace(&raw) else {
+        warn("bt address: invalid");
+        return 1;
+    };
+    if set_property(BT_ADDRESS_PROPERTY, &address.property_value()) {
+        info("bt address: set");
+        0
+    } else {
+        error("bt address: property not set");
+        1
     }
 }
 
@@ -237,6 +277,28 @@ fn selinux_enforcing() -> bool {
     std::fs::read_to_string("/sys/fs/selinux/enforce")
         .map(|s| s.trim() == "1")
         .unwrap_or(false)
+}
+
+#[cfg(target_os = "android")]
+fn set_property(name: &str, value: &str) -> bool {
+    use std::ffi::CString;
+    extern "C" {
+        fn __system_property_set(
+            name: *const libc::c_char,
+            value: *const libc::c_char,
+        ) -> libc::c_int;
+    }
+    let (Ok(name), Ok(value)) = (CString::new(name), CString::new(value)) else {
+        return false;
+    };
+    // SAFETY: both pointers reference live NUL-terminated C strings for the
+    // duration of the synchronous call; bionic copies them into its request.
+    unsafe { __system_property_set(name.as_ptr(), value.as_ptr()) == 0 }
+}
+
+#[cfg(not(target_os = "android"))]
+fn set_property(_name: &str, _value: &str) -> bool {
+    false
 }
 
 fn info(msg: &str) {
