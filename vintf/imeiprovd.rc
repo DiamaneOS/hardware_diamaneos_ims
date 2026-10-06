@@ -23,3 +23,23 @@ service vendor.imeiprovd /vendor/bin/imeiprovd --write
     capabilities
     oneshot
     disabled
+
+# Factory Bluetooth address (finding -177). Reads the 6 address bytes from the
+# traceability partition, validates them and sets
+# ro.vendor.diamaneos.bt.factory_address, which only this domain may set; the
+# device's Bluetooth init rc copies it to the property its HCI implementation
+# reads, as stock tctd.rc does. A missing or invalid address sets nothing and
+# logs only "bt address: missing" or "bt address: invalid"; the address is
+# never logged. Same user, group and domain as above; no capabilities; started
+# early in vendor init (no persistent-properties gate needed), well before the
+# HCI implementation reads the address when Bluetooth is first turned on.
+service vendor.imeiprovd-bt /vendor/bin/imeiprovd --bt-address
+    class main
+    user vendor_imeiprov
+    group vendor_imeiprov
+    capabilities
+    oneshot
+    disabled
+
+on post-fs
+    start vendor.imeiprovd-bt

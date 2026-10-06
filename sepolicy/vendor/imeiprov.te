@@ -5,11 +5,14 @@
 # groups, no capabilities): the one-shot IMEI provisioning tool for finding -171.
 # It reads the two IMEIs from the read-only traceability partition and, in
 # --write mode, provisions modem NV 550 over the Fairphone TCL QMI service
-# (QRTR service 0x2ff). It replaces only the modem-NV part of stock `tctd`; it
-# sets no properties, writes no MAC/region data and opens no non-QRTR socket.
+# (QRTR service 0x2ff). In --bt-address mode (finding -177) it reads the factory
+# Bluetooth address from the same partition and sets one property. It replaces
+# the modem-NV and Bluetooth-address parts of stock `tctd`; it writes no
+# MAC/region data and opens no non-QRTR socket besides the property socket.
 #
 # It gets exactly: a QRTR socket, read-only access to the traceability block
-# device, and the SELinux enforce flag it checks before running. Nothing else.
+# device, the SELinux enforce flag it checks before running, and setting its
+# one Bluetooth address property. Nothing else.
 type diamaneos_imeiprov, domain;
 type diamaneos_imeiprov_exec, exec_type, vendor_file_type, file_type;
 init_daemon_domain(diamaneos_imeiprov)
@@ -27,6 +30,10 @@ allow diamaneos_imeiprov vendor_traceability_block_device:blk_file { open read g
 # Refuse to run unless caller isolation is enforced (read /sys/fs/selinux/enforce).
 allow diamaneos_imeiprov selinuxfs:file r_file_perms;
 
+# --bt-address: set ro.vendor.diamaneos.bt.factory_address (property_contexts,
+# exact name), through the property socket. No other property.
+set_prop(diamaneos_imeiprov, vendor_diamaneos_bt_address_prop)
+
 # --- least privilege, enforced by neverallow ---
 neverallow diamaneos_imeiprov self:global_capability_class_set *;
 neverallow diamaneos_imeiprov self:global_capability2_class_set *;
@@ -35,8 +42,22 @@ neverallow diamaneos_imeiprov self:{ diamaneos_nonlocal_socket_classes } create;
 # Never write any block device: the traceability partition is read-only to us,
 # and modem NV is reached only through QMI, never by writing a partition.
 neverallow diamaneos_imeiprov dev_type:blk_file { write append };
-# Sets no property (the mode is a fixed rc argument, not a property).
-neverallow diamaneos_imeiprov property_type:property_service set;
+# Sets no other property (the mode is a fixed rc argument, not a property).
+neverallow diamaneos_imeiprov {
+  property_type
+  -vendor_diamaneos_bt_address_prop
+}:property_service set;
+# Only imeiprovd sets the factory Bluetooth address (init may set any property).
+neverallow { domain -init -diamaneos_imeiprov } vendor_diamaneos_bt_address_prop:property_service set;
+# Only imeiprovd, init, vendor_init (the device's copy trigger) and dumpstate
+# (which reads every property) may read it.
+neverallow {
+  domain
+  -init
+  -vendor_init
+  -dumpstate
+  -diamaneos_imeiprov
+} vendor_diamaneos_bt_address_prop:file { open read map };
 # No persistent file writes. coredump_file (userdebug) and method_trace_data_file
 # (coverage builds) are granted to every domain by the platform policy.
 neverallow diamaneos_imeiprov {
