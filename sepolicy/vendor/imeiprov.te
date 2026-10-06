@@ -47,8 +47,9 @@ neverallow diamaneos_imeiprov {
   property_type
   -vendor_diamaneos_bt_address_prop
 }:property_service set;
-# Only imeiprovd sets the factory Bluetooth address (init may set any property).
-neverallow { domain -init -diamaneos_imeiprov } vendor_diamaneos_bt_address_prop:property_service set;
+# Only imeiprovd sets the factory Bluetooth address (init may set any property,
+# and the platform lets vendor_init set every vendor property).
+neverallow { domain -init -vendor_init -diamaneos_imeiprov } vendor_diamaneos_bt_address_prop:property_service set;
 # Only imeiprovd, init, vendor_init (the device's copy trigger) and dumpstate
 # (which reads every property) may read it.
 neverallow {
