@@ -5,3 +5,10 @@
 # sets the build defaults from /vendor/build.prop (vendor_init.te); on
 # userdebug builds root can change them for lab tests.
 vendor_internal_prop(vendor_diamaneos_imsdcm_prop)
+
+# ro.vendor.diamaneos.bt.factory_address: the factory Bluetooth address, read by
+# imeiprovd --bt-address from the traceability partition (imeiprov.te). Vendor
+# internal: no platform domain or app can read it; only imeiprovd sets it, once
+# per boot (ro.). The device's Bluetooth init rc reads it (vendor_init) to copy
+# it to the property its HCI implementation reads.
+vendor_internal_prop(vendor_diamaneos_bt_address_prop)

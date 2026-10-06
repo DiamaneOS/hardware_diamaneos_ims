@@ -16,3 +16,7 @@ vendor.diamaneos.ims.dcm_kill             u:object_r:vendor_diamaneos_imsdcm_pro
 
 ro.vendor.diamaneos.ims.modem_node u:object_r:vendor_diamaneos_imsdcm_prop:s0 exact uint
 ro.vendor.diamaneos.ims.slots u:object_r:vendor_diamaneos_imsdcm_prop:s0 exact uint
+
+# The factory Bluetooth address from the traceability partition, set once per
+# boot by imeiprovd --bt-address (property.te, imeiprov.te).
+ro.vendor.diamaneos.bt.factory_address u:object_r:vendor_diamaneos_bt_address_prop:s0 exact string
