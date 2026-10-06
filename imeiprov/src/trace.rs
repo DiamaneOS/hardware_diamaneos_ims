@@ -5,12 +5,14 @@
 //! The partition stores each IMEI as 15 ASCII digits. Stock `tctd` (`start`
 //! @0xbb18-0xbb58) reads slot 1 at offset 0x24 and slot 2 at offset 0x263, each
 //! 15 bytes. The Bluetooth address follows slot 1: 6 bytes at 0x33 (stock
-//! @0xb434; see `bdaddr`). This module opens the block device O_RDONLY and
-//! reads only those windows, the IMEIs in `--write`/`--check` mode and the
-//! address in `--bt-address` mode; it never reads the Wi-Fi MAC (0x39) or the
-//! region/CU byte (0x19d), and it never writes.
+//! @0xb434; see `bdaddr`), then the Wi-Fi MAC: 6 bytes at 0x39 (see
+//! `wlanmac`). This module opens the block device O_RDONLY and reads only
+//! those windows, one mode at a time: the IMEIs in `--write`/`--check` mode,
+//! the Bluetooth address in `--bt-address` mode and the Wi-Fi MAC in
+//! `--wlan-mac` mode. It never reads the region/CU byte (0x19d) and never
+//! writes.
 
-use diamaneos_imeiprov::bdaddr;
+use diamaneos_imeiprov::{bdaddr, eui48, wlanmac};
 use diamaneos_imeiprov::imei::{Error as ImeiError, Imei};
 use std::fs::File;
 use std::io;
@@ -47,9 +49,19 @@ pub fn read_imeis(path: &str) -> Result<(Imei, Imei), Error> {
 /// Open read-only and return the 6 raw Bluetooth address bytes, as stored
 /// (least significant first). Decoding and validation are in `bdaddr`.
 pub fn read_bt_address(path: &str) -> io::Result<[u8; bdaddr::LEN]> {
+    read_eui48(path, bdaddr::TRACE_OFFSET)
+}
+
+/// Open read-only and return the 6 raw Wi-Fi MAC bytes, as stored (least
+/// significant first). Decoding and validation are in `wlanmac`.
+pub fn read_wlan_mac(path: &str) -> io::Result<[u8; wlanmac::LEN]> {
+    read_eui48(path, wlanmac::TRACE_OFFSET)
+}
+
+fn read_eui48(path: &str, offset: u64) -> io::Result<[u8; eui48::LEN]> {
     let file = open(path)?;
-    let mut buf = [0u8; bdaddr::LEN];
-    file.read_exact_at(&mut buf, bdaddr::TRACE_OFFSET)?;
+    let mut buf = [0u8; eui48::LEN];
+    file.read_exact_at(&mut buf, offset)?;
     Ok(buf)
 }
 

@@ -11,13 +11,14 @@
 //! [`BdAddr`] has no `Display` and a redacting `Debug`; the only way out is
 //! [`BdAddr::property_value`], which goes straight into the property.
 
+use crate::eui48::{self, Fault};
 use core::fmt;
 
 /// Offset of the address in the traceability partition (right after the slot 1
 /// IMEI at 0x24..0x33).
 pub const TRACE_OFFSET: u64 = 0x33;
 /// Bytes of a Bluetooth device address.
-pub const LEN: usize = 6;
+pub const LEN: usize = eui48::LEN;
 /// Length of the property value, `xx:xx:xx:xx:xx:xx`. The HCI implementation
 /// accepts only exactly this length.
 pub const PROPERTY_LEN: usize = 17;
@@ -59,9 +60,7 @@ impl BdAddr {
     /// Decode the 6 bytes as stored in traceability (least significant first)
     /// and validate them.
     pub fn from_trace(raw: &[u8]) -> Result<Self, Error> {
-        let raw: [u8; LEN] = raw.try_into().map_err(|_| Error::Length)?;
-        let mut bytes = raw;
-        bytes.reverse();
+        let bytes = eui48::from_stored(raw)?;
         validate(&bytes)?;
         Ok(Self { bytes })
     }
@@ -82,21 +81,24 @@ impl BdAddr {
     }
 }
 
+impl From<Fault> for Error {
+    fn from(fault: Fault) -> Self {
+        match fault {
+            Fault::Length => Error::Length,
+            Fault::Zero => Error::Zero,
+            Fault::Erased => Error::Erased,
+            Fault::Group => Error::Group,
+            Fault::Local => Error::Local,
+        }
+    }
+}
+
 /// Checks an address given most significant byte first. Stock does no checks;
-/// these reject only values that cannot be a factory-assigned device address.
+/// these reject only values that cannot be a factory-assigned device address:
+/// the EUI-48 checks shared with the Wi-Fi MAC (`eui48::check`) plus the
+/// reserved inquiry LAPs.
 pub fn validate(bytes: &[u8; LEN]) -> Result<(), Error> {
-    if bytes.iter().all(|&b| b == 0) {
-        return Err(Error::Zero);
-    }
-    if bytes.iter().all(|&b| b == 0xff) {
-        return Err(Error::Erased);
-    }
-    if bytes[0] & 0x01 != 0 {
-        return Err(Error::Group);
-    }
-    if bytes[0] & 0x02 != 0 {
-        return Err(Error::Local);
-    }
+    eui48::check(bytes)?;
     let lap = u32::from_be_bytes([0, bytes[3], bytes[4], bytes[5]]);
     if (0x9E_8B00..=0x9E_8B3F).contains(&lap) {
         return Err(Error::ReservedLap);

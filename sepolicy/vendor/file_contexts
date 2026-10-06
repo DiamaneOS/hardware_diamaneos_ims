@@ -2,3 +2,5 @@
 # Copyright 2026 The DiamaneOS Project
 /vendor/bin/imsdcmd     u:object_r:diamaneos_imsdcm_exec:s0
 /vendor/bin/imeiprovd   u:object_r:diamaneos_imeiprov_exec:s0
+# The factory Wi-Fi MAC firmware tree (tmpfs; file.te, imeiprov.te).
+/mnt/vendor/wlan_mac(/.*)?   u:object_r:vendor_diamaneos_wlan_mac_file:s0
