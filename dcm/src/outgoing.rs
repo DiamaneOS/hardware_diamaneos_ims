@@ -86,6 +86,10 @@ impl Retained {
     pub fn wire_size_bound(&self) -> usize {
         self.packet.wire_size_bound()
     }
+    /// A session's terminal result; the adapter's queue keeps room for these.
+    pub fn is_terminal(&self) -> bool {
+        matches!(self.packet.fence, Fence::Terminal(_))
+    }
 }
 #[derive(Clone, Copy)]
 pub enum Disposition {
