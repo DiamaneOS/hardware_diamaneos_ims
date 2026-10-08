@@ -25,9 +25,10 @@ other identifier.
 
 ## Modes
 
-- `--check`: decode, validate and compare; never writes. For dry runs
-  (`adb shell su 0 /vendor/bin/imeiprovd --check` on a userdebug build).
-- `--write`: the shipped configuration; `imeiprovd.rc` runs it once per boot.
+- `--check`: decode, validate and compare, never write. `--check` and
+  `--write` take the modem's QRTR node and use the TCL QMI service only if it
+  is on that node, as announced by the local QRTR name service.
+- `--write`: the shipped configuration, run once per boot by `imeiprovd.rc`.
   As `--check`, then, only after a successful read, provisions both
   subscriptions and reads back. It writes even when slot 1 already matches:
   the read cannot show slot 2, so a boot whose slot 2 write failed would
@@ -160,18 +161,14 @@ host tests (`./tests/run-host-tests.sh`).
 
 ## Checking on a phone
 
-1. Boot the phone; the service runs once after persistent properties are ready.
-2. Read the result: `adb logcat -d -s imeiprovd`. Or run a dry run as root on a
-   userdebug build: `adb shell su 0 /vendor/bin/imeiprovd --check`.
-3. Before provisioning, `--check` shows:
-   - `trace: slot1_valid=true slot2_valid=true distinct=true`
-   - `modem: read_ok=true provisioned=false`
-
-   So the traceability decode and the modem NV read work, and NV 550 was never
-   written (the modem reports Qualcomm's placeholder IMEI).
-4. After a `--write` run and a reboot, `--check` shows
-   `modem: read_ok=true provisioned=true luhn_valid=true matches_slot1=true`,
-   and `*#06#` shows the real IMEIs on both slots.
+1. Boot the phone. The service runs once after persistent properties are ready.
+2. `adb logcat -d -s imeiprovd` shows the run:
+   - `trace: slot1_valid=true slot2_valid=true distinct=true`: the
+     traceability decode works.
+   - `modem: read_ok=true provisioned=...`: the modem's value before the
+     write. It is `provisioned=false` after a slot switch or an OTA.
+   - `write: sub0_ok=true sub1_ok=true verify_slot1=true`
+3. `*#06#` shows the real IMEIs on both slots.
 
 A failed read logs `read_ok=false reason=...` with the error kind or NV status
 only.
