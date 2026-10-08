@@ -16,7 +16,9 @@
 # - oneshot: runs once per boot and exits; init does not restart it.
 # - disabled, started only by the system_ext trigger in imeiprovd-control.rc,
 #   because a vendor init trigger cannot gate on persistent-properties readiness.
-service vendor.imeiprovd /vendor/bin/imeiprovd --write
+# The modem's QRTR node is the one the IMS product pins (ims-product.mk); only
+# a TCL QMI service on that node is used.
+service vendor.imeiprovd /vendor/bin/imeiprovd --write ${ro.vendor.diamaneos.ims.modem_node}
     class main
     user vendor_imeiprov
     group vendor_imeiprov

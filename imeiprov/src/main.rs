@@ -67,10 +67,10 @@ fn main() {
 }
 
 fn run() -> i32 {
-    let mode = match parse_mode() {
+    let (mode, modem_node) = match parse_mode() {
         Some(m) => m,
         None => {
-            error("usage: imeiprovd --check | --write | --bt-address | --wlan-mac");
+            error("usage: imeiprovd --check NODE | --write NODE | --bt-address | --wlan-mac");
             return 2;
         }
     };
@@ -92,6 +92,9 @@ fn run() -> i32 {
     if mode == Mode::WlanMac {
         return provide_wlan_mac();
     }
+    let Some(modem_node) = modem_node else {
+        return 2;
+    };
 
     // Read and validate the traceability IMEIs (read-only).
     let (slot1, slot2) = match trace::read_imeis(trace::PATH) {
@@ -124,7 +127,7 @@ fn run() -> i32 {
             return 1;
         }
     };
-    let server = match client.lookup(SERVICE_ID, SERVICE_INSTANCE, LOOKUP_TIMEOUT) {
+    let server = match client.lookup(SERVICE_ID, SERVICE_INSTANCE, modem_node, LOOKUP_TIMEOUT) {
         Ok(Some(peer)) => peer,
         Ok(None) => {
             error("TCT QMI service not found");
@@ -178,13 +181,15 @@ fn run() -> i32 {
     }
 }
 
-fn parse_mode() -> Option<Mode> {
+/// The IMEI modes take the modem's QRTR node (ro.vendor.diamaneos.ims.modem_node,
+/// which imeiprovd.rc passes): only that node may serve the TCL QMI service.
+fn parse_mode() -> Option<(Mode, Option<u32>)> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.as_slice() {
-        [a] if a == "--check" => Some(Mode::Check),
-        [a] if a == "--write" => Some(Mode::Write),
-        [a] if a == "--bt-address" => Some(Mode::BtAddress),
-        [a] if a == "--wlan-mac" => Some(Mode::WlanMac),
+        [a, node] if a == "--check" => Some((Mode::Check, Some(node.parse().ok()?))),
+        [a, node] if a == "--write" => Some((Mode::Write, Some(node.parse().ok()?))),
+        [a] if a == "--bt-address" => Some((Mode::BtAddress, None)),
+        [a] if a == "--wlan-mac" => Some((Mode::WlanMac, None)),
         _ => None,
     }
 }

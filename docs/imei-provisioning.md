@@ -26,7 +26,10 @@ other identifier.
 ## Modes
 
 - `--check`: decode, validate and compare; never writes. For dry runs
-  (`adb shell su 0 /vendor/bin/imeiprovd --check` on a userdebug build).
+  (`adb shell 'su 0 /vendor/bin/imeiprovd --check $(getprop ro.vendor.diamaneos.ims.modem_node)'`
+  on a userdebug build). `--check` and `--write` take the modem's QRTR node and
+  use the TCL QMI service only if it is on that node, as announced by the local
+  QRTR name service.
 - `--write`: the shipped configuration; `imeiprovd.rc` runs it once per boot.
   As `--check`, then, only after a successful read, provisions both
   subscriptions and reads back. It writes even when slot 1 already matches:
@@ -162,7 +165,7 @@ host tests (`./tests/run-host-tests.sh`).
 
 1. Boot the phone; the service runs once after persistent properties are ready.
 2. Read the result: `adb logcat -d -s imeiprovd`. Or run a dry run as root on a
-   userdebug build: `adb shell su 0 /vendor/bin/imeiprovd --check`.
+   userdebug build: `adb shell 'su 0 /vendor/bin/imeiprovd --check $(getprop ro.vendor.diamaneos.ims.modem_node)'`.
 3. Before provisioning, `--check` shows:
    - `trace: slot1_valid=true slot2_valid=true distinct=true`
    - `modem: read_ok=true provisioned=false`

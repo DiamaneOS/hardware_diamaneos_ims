@@ -192,15 +192,22 @@ impl Client {
         )
     }
 
-    /// Look up a service by (service, instance). Sends one NEW_LOOKUP and waits
-    /// for a matching NEW_SERVER notification until the deadline. Returns the
-    /// server's peer, or None if it never appears (e.g. the modem is not up).
+    /// Look up a service by (service, instance) on the modem's QRTR node. Sends
+    /// one NEW_LOOKUP and waits for a matching NEW_SERVER notification until the
+    /// deadline. Only notices from the local name service count, and only for a
+    /// server on `modem_node`, so another node or a local process cannot stand
+    /// in for the modem. Returns the server's peer, or None if it never appears
+    /// (e.g. the modem is not up).
     pub fn lookup(
         &self,
         service: u32,
         instance: u32,
+        modem_node: u32,
         overall: Duration,
     ) -> io::Result<Option<Peer>> {
+        if modem_node == self.local.node {
+            return Err(io::Error::other("modem node is local"));
+        }
         self.control(Control {
             command: NEW_LOOKUP,
             words: [service, instance, 0, 0],
@@ -211,11 +218,16 @@ impl Client {
             let Some((from, data)) = self.recv(Duration::from_millis(200))? else {
                 continue;
             };
-            if from.port != CTRL_PORT {
+            if from.node != self.local.node || from.port != CTRL_PORT {
                 continue;
             }
             if let Some(c) = Control::decode(&data) {
-                if c.command == NEW_SERVER && c.words[0] == service && c.words != [0; 4] {
+                if c.command == NEW_SERVER
+                    && c.words[0] == service
+                    && c.words[2] == modem_node
+                    && c.words[3] != 0
+                    && c.words[3] != CTRL_PORT
+                {
                     found = Some(Peer {
                         node: c.words[2],
                         port: c.words[3],
