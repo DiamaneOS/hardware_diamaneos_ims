@@ -87,6 +87,23 @@ fn expiry_and_overflow_return_all_affected_ownership_only() {
 }
 
 #[test]
+fn terminal_results_keep_room_in_a_full_queue_and_their_order() {
+    let mut queue = Outbox::default();
+    let capacity = 4 * MAX_SESSIONS;
+    for i in 0..capacity {
+        assert!(queue.enqueue(A, i, 20, 0).is_ok());
+    }
+    for i in 0..MAX_SESSIONS {
+        assert!(queue.enqueue_terminal(A, capacity + i, 20, 0).is_ok());
+    }
+    // The reserve is for terminal results only, and bounded.
+    assert!(queue.enqueue(A, 999, 20, 0).is_err());
+    assert!(queue.enqueue_terminal(A, 999, 20, 0).is_err());
+    let values = queue.purge(A);
+    assert_eq!(values, (0..capacity + MAX_SESSIONS).collect::<Vec<_>>());
+}
+
+#[test]
 fn only_a_failed_send_reports_peer_loss_and_expired_work_can_be_queued_again() {
     let mut queue = Outbox::default();
     assert!(queue.enqueue(A, 1, 20, 0).is_ok());

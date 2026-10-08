@@ -12,7 +12,10 @@ use std::collections::{BTreeMap, VecDeque};
 // broker-release barrier and terminal result for every owned session.
 const MAX_PEERS: usize = 4;
 const MAX_ITEMS_PER_PEER: usize = 4 * MAX_SESSIONS;
-const MAX_BYTES_PER_PEER: usize = MAX_ITEMS_PER_PEER * MAX_DATAGRAM;
+// Repeated requests can fill that with replies that stay valid. Terminal
+// results get room of their own: each pins its SID until it is finished, so
+// no more than MAX_SESSIONS are ever queued.
+const TERMINAL_RESERVE: usize = MAX_SESSIONS;
 const SUBMISSION_DEADLINE_MS: u64 = 2_000;
 
 struct Entry<T> {
@@ -64,6 +67,26 @@ impl<T> Outbox<T> {
         bytes: usize,
         now_ms: u64,
     ) -> Result<(), Rejected<T>> {
+        self.admit(peer, token, bytes, now_ms, 0)
+    }
+    /// A session's terminal result, which may also use TERMINAL_RESERVE.
+    pub fn enqueue_terminal(
+        &mut self,
+        peer: Peer,
+        token: T,
+        bytes: usize,
+        now_ms: u64,
+    ) -> Result<(), Rejected<T>> {
+        self.admit(peer, token, bytes, now_ms, TERMINAL_RESERVE)
+    }
+    fn admit(
+        &mut self,
+        peer: Peer,
+        token: T,
+        bytes: usize,
+        now_ms: u64,
+        reserve: usize,
+    ) -> Result<(), Rejected<T>> {
         if bytes > MAX_DATAGRAM
             || (!self.peers.contains_key(&peer) && self.peers.len() == MAX_PEERS)
         {
@@ -73,7 +96,8 @@ impl<T> Outbox<T> {
             items: VecDeque::new(),
             bytes: 0,
         });
-        if queue.items.len() == MAX_ITEMS_PER_PEER || bytes > MAX_BYTES_PER_PEER - queue.bytes {
+        let items = MAX_ITEMS_PER_PEER + reserve;
+        if queue.items.len() >= items || bytes > items * MAX_DATAGRAM - queue.bytes {
             return Err(Rejected { token });
         }
         queue.bytes += bytes;

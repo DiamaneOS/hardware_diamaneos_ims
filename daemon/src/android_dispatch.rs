@@ -7,7 +7,7 @@ use diamaneos_ims_dcm::{
     outgoing::{Disposition, Retained},
 };
 use diamaneos_ims_runtime::{
-    outbox::{Attempt, Finished, Outbox},
+    outbox::{Attempt, Finished, Outbox, Rejected},
     socket::Qrtr,
     transport::{classify, exhausted, Fault},
 };
@@ -40,6 +40,22 @@ fn callback(result: binder::Result<()>, lost: &mut Option<u64>, epoch: u64) -> b
     }
 }
 impl Dispatch {
+    /// Terminal results use the queue's reserve, so congestion from replies
+    /// that are still valid cannot discard them while the peer lives.
+    fn enqueue(
+        &mut self,
+        peer: Peer,
+        work: Work,
+        cost: usize,
+        now: u64,
+    ) -> Result<(), Rejected<Work>> {
+        match &work {
+            Work::Packet(packet) if packet.is_terminal() => {
+                self.queue.enqueue_terminal(peer, work, cost, now)
+            }
+            _ => self.queue.enqueue(peer, work, cost, now),
+        }
+    }
     fn release(
         &mut self,
         engine: &mut Engine,
@@ -94,7 +110,7 @@ impl Dispatch {
                         Work::Packet(packet) => packet.wire_size_bound(),
                         Work::Release { .. } => 0,
                     };
-                    if let Err(rejected) = self.queue.enqueue(peer, item, cost, now) {
+                    if let Err(rejected) = self.enqueue(peer, item, cost, now) {
                         self.finish_purged(engine, broker, vec![rejected.token]);
                     }
                 }
@@ -183,8 +199,7 @@ impl Dispatch {
                             engine.finish_output(packet, Disposition::Obsolete);
                         }
                     }
-                    if let Err(rejected) = self.queue.enqueue(peer, Work::Packet(packet), cost, now)
-                    {
+                    if let Err(rejected) = self.enqueue(peer, Work::Packet(packet), cost, now) {
                         let mut work = self.queue.purge(peer);
                         work.push(rejected.token);
                         pending.extend(self.stalled(engine, broker, peer, work, now));
