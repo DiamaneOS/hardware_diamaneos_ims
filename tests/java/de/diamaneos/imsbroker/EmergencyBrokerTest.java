@@ -14,6 +14,7 @@ import android.net.TelephonyNetworkSpecifier;
 import android.os.Binder;
 import android.os.Handler;
 import android.os.IBinder;
+import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.telephony.SubscriptionManager;
 
@@ -49,6 +50,15 @@ public final class EmergencyBrokerTest {
         IBinder.DeathRecipient death;
         final List<String> reports = new ArrayList<>();
         final List<PdnInfo> infos = new ArrayList<>();
+        /** Reports that fail while the daemon lives (a full binder buffer): no death follows. */
+        int failNext;
+
+        private void deliver() throws RemoteException {
+            if (failNext > 0) {
+                failNext--;
+                throw new RemoteException();
+            }
+        }
 
         @Override
         public void linkToDeath(IBinder.DeathRecipient recipient, int flags) {
@@ -66,18 +76,21 @@ public final class EmergencyBrokerTest {
         }
 
         @Override
-        public void onPdnUp(PdnRequest request, PdnInfo info) {
+        public void onPdnUp(PdnRequest request, PdnInfo info) throws RemoteException {
+            deliver();
             reports.add("up " + id(request) + " " + info.networkHandle);
             infos.add(info);
         }
 
         @Override
-        public void onPdnDown(PdnRequest request) {
+        public void onPdnDown(PdnRequest request) throws RemoteException {
+            deliver();
             reports.add("down " + id(request));
         }
 
         @Override
-        public void onPdnFailed(PdnRequest request, int reason) {
+        public void onPdnFailed(PdnRequest request, int reason) throws RemoteException {
+            deliver();
             reports.add("failed " + id(request) + " " + reason);
         }
 
@@ -472,6 +485,59 @@ public final class EmergencyBrokerTest {
         check(rig.cm.unregistered.isEmpty(), "still held");
     }
 
+    static void undeliveredReportIsSentAgainWithTheCurrentState() throws Exception {
+        Rig rig = new Rig();
+        rig.bringUp(NO_SLOT, SOS, 1);
+        ConnectivityManager.NetworkCallback cb = rig.callback(0);
+        Network first = new Network(1100);
+        rig.daemon.failNext = 1;
+        rig.up(cb, first, cellular(EIMS_CAP, -1), dual());
+        reports(rig.daemon);
+        rig.handler.runDelayed();
+        rig.handler.drain();
+        reports(rig.daemon, "up sos-1#1 1100");
+        rig.handler.runDelayed();
+        rig.handler.drain();
+        reports(rig.daemon); // Delivered: nothing left to retry.
+        rig.daemon.failNext = 1;
+        cb.onLost(first);
+        rig.handler.drain();
+        reports(rig.daemon);
+        rig.up(cb, new Network(1101), cellular(EIMS_CAP, -1), dual());
+        reports(rig.daemon, "up sos-1#1 1101");
+        rig.handler.runDelayed();
+        rig.handler.drain();
+        reports(rig.daemon); // The current state replaced the lost down.
+        rig.daemon.failNext = 1;
+        cb.onLost(new Network(1101));
+        rig.handler.drain();
+        rig.release(NO_SLOT, SOS, 1);
+        rig.handler.runDelayed();
+        rig.handler.drain();
+        reports(rig.daemon); // Released: no retry.
+    }
+
+    static void undeliveredFailureIsSentAgainButNotToANewDaemon() throws Exception {
+        Rig rig = new Rig();
+        rig.bringUp(NO_SLOT, SOS, 1);
+        rig.daemon.failNext = 1;
+        rig.callback(0).onUnavailable();
+        rig.handler.drain();
+        reports(rig.daemon);
+        rig.handler.runDelayed();
+        rig.handler.drain();
+        reports(rig.daemon, "failed sos-1#1 " + PdnFailure.UNAVAILABLE);
+        rig.bringUp(NO_SLOT, SOS, 2);
+        rig.daemon.failNext = 1;
+        rig.callback(1).onUnavailable();
+        rig.handler.drain();
+        Daemon old = rig.restartDaemon();
+        rig.handler.runDelayed();
+        rig.handler.drain();
+        reports(old);
+        reports(rig.daemon);
+    }
+
     static void check(boolean value, String what) {
         if (!value) throw new AssertionError(what);
     }
@@ -498,6 +564,8 @@ public final class EmergencyBrokerTest {
             EmergencyBrokerTest::subscriptionChangeWithdrawsTheSimEmergencyButNotTheNoSimOne,
             EmergencyBrokerTest::onlyPreferredAddressesAreReported,
             EmergencyBrokerTest::blockedStatusDoesNotAffectTheEmergencyBearer,
+            EmergencyBrokerTest::undeliveredReportIsSentAgainWithTheCurrentState,
+            EmergencyBrokerTest::undeliveredFailureIsSentAgainButNotToANewDaemon,
         };
         for (Scenario s : scenarios) {
             s.run();

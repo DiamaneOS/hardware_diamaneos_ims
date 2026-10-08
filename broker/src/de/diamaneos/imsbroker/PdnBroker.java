@@ -52,6 +52,10 @@ import java.util.List;
  *
  * <p>All state lives on one looper thread. Binder calls from the daemon and death notifications are
  * posted to it.
+ *
+ * <p>A oneway report can fail while the daemon lives (for example while its binder buffer is
+ * full), and then no binderDied() follows. Such a report is sent again, with the request's
+ * current state, until the daemon receives it or the request or daemon is gone.
  */
 final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
     private static final String TAG = "ImsBroker";
@@ -73,11 +77,15 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
     /** Stock CneApp accepts slots 0..2 (RatInfo.isSlotIdValid, 0x014ad0). */
     private static final int MAX_SLOTS = 3;
 
+    private static final long REPORT_RETRY_MS = 1000;
+
     private final Handler mHandler;
     private final ConnectivityManager mConnectivityManager;
     private final SubscriptionManager mSubscriptionManager;
     private final DcmConnection mConnection;
     private final SparseArray<PdnTracker> mTrackers = new SparseArray<>();
+    /** Failure reports the daemon did not receive, by key(); the requests are no longer held. */
+    private final SparseArray<Runnable> mUnsentFailures = new SparseArray<>();
     private final SubscriptionManager.OnSubscriptionsChangedListener mSubscriptionsListener =
             new SubscriptionManager.OnSubscriptionsChangedListener() {
                 @Override
@@ -119,6 +127,11 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
             unregister(mTrackers.valueAt(i));
         }
         mTrackers.clear();
+        // A restarted daemon numbers its requests anew: never send it an old failure.
+        for (int i = 0; i < mUnsentFailures.size(); i++) {
+            mHandler.removeCallbacks(mUnsentFailures.valueAt(i));
+        }
+        mUnsentFailures.clear();
     }
 
     // Requests from the daemon
@@ -244,6 +257,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
     }
 
     private void unregister(PdnTracker tracker) {
+        mHandler.removeCallbacksAndMessages(tracker);
         tracker.close();
         if (!tracker.filed) {
             return;
@@ -318,32 +332,62 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
     // Reports to the daemon (oneway; a dead daemon is handled by binderDied)
 
     private void reportUp(PdnTracker tracker, PdnInfo info) {
+        mHandler.removeCallbacksAndMessages(tracker);
         try {
             if (mDcm != null) {
                 mDcm.onPdnUp(tracker.request(), info);
             }
         } catch (RemoteException e) {
-            // binderDied() follows.
+            Log.w(TAG, "report not delivered; retrying");
+            retryState(tracker);
         }
     }
 
     private void reportDown(PdnTracker tracker) {
+        mHandler.removeCallbacksAndMessages(tracker);
         try {
             if (mDcm != null) {
                 mDcm.onPdnDown(tracker.request());
             }
         } catch (RemoteException e) {
-            // binderDied() follows.
+            Log.w(TAG, "report not delivered; retrying");
+            retryState(tracker);
         }
     }
 
+    /** Reports the held request's current state again later; unregister() cancels it. */
+    private void retryState(PdnTracker tracker) {
+        mHandler.postDelayed(
+                () -> {
+                    if (mTrackers.get(key(tracker.slot, tracker.type)) != tracker) return;
+                    if (tracker.isSettling()) {
+                        retryState(tracker);
+                    } else if (tracker.reported != null) {
+                        reportUp(tracker, tracker.reported);
+                    } else if (tracker.lost) {
+                        reportDown(tracker);
+                    }
+                },
+                tracker,
+                REPORT_RETRY_MS);
+    }
+
     private void reportFailed(PdnRequest request, int reason) {
+        int key = key(request.slot, request.type);
+        Runnable unsent = mUnsentFailures.get(key);
+        if (unsent != null) {
+            mHandler.removeCallbacks(unsent);
+            mUnsentFailures.remove(key);
+        }
         try {
             if (mDcm != null) {
                 mDcm.onPdnFailed(request, reason);
             }
         } catch (RemoteException e) {
-            // binderDied() follows.
+            Log.w(TAG, "report not delivered; retrying");
+            Runnable retry = () -> reportFailed(request, reason);
+            mUnsentFailures.put(key, retry);
+            mHandler.postDelayed(retry, REPORT_RETRY_MS);
         }
     }
 

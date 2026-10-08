@@ -9,7 +9,17 @@ import java.util.List;
 /** A looper the simulation runs by hand; delayed work runs only when asked. */
 public class Handler {
     private final ArrayDeque<Runnable> queue = new ArrayDeque<>();
-    private final List<Runnable> delayed = new ArrayList<>();
+    private final List<Delayed> delayed = new ArrayList<>();
+
+    private static final class Delayed {
+        final Runnable work;
+        final Object token;
+
+        Delayed(Runnable work, Object token) {
+            this.work = work;
+            this.token = token;
+        }
+    }
 
     public synchronized boolean post(Runnable work) {
         queue.add(work);
@@ -18,8 +28,26 @@ public class Handler {
     }
 
     public synchronized boolean postDelayed(Runnable work, long delayMillis) {
-        delayed.add(work);
+        return postDelayed(work, null, delayMillis);
+    }
+
+    public synchronized boolean postDelayed(Runnable work, Object token, long delayMillis) {
+        delayed.add(new Delayed(work, token));
         return true;
+    }
+
+    /** Removes pending posts of {@code work}, as the platform does. */
+    public synchronized void removeCallbacks(Runnable work) {
+        queue.removeIf(r -> r == work);
+        delayed.removeIf(d -> d.work == work);
+    }
+
+    /** Removes delayed work posted with {@code token}; null removes everything. */
+    public synchronized void removeCallbacksAndMessages(Object token) {
+        if (token == null) {
+            queue.clear();
+        }
+        delayed.removeIf(d -> token == null || d.token == token);
     }
 
     /** Runs queued work, including work it posts, until the queue is empty. */
@@ -45,7 +73,9 @@ public class Handler {
     }
 
     public synchronized void runDelayed() {
-        queue.addAll(delayed);
+        for (Delayed d : delayed) {
+            queue.add(d.work);
+        }
         delayed.clear();
     }
 }
