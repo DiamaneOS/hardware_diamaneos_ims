@@ -17,8 +17,8 @@ no properties.
    no placeholder constant is in the source.
 3. Reads the modem's current NV IMEI (item 550) over the Fairphone TCL QMI
    service on QRTR and compares it with the traceability values.
-4. In `--write` mode only: writes the NV item for each subscription whose value
-   differs, then reads it back to verify.
+4. In `--write` mode only: writes the NV item for both subscriptions, then
+   reads slot 1 back to verify (the read has no subscription selector).
 
 It logs only booleans and counters (logcat tag `imeiprovd`), never an IMEI or
 other identifier.
@@ -28,8 +28,10 @@ other identifier.
 - `--check`: decode, validate and compare; never writes. For dry runs
   (`adb shell su 0 /vendor/bin/imeiprovd --check` on a userdebug build).
 - `--write`: the shipped configuration; `imeiprovd.rc` runs it once per boot.
-  As `--check`, then, only after a successful read shows NV 550 unprovisioned or
-  different from slot 1, provisions both subscriptions and reads back.
+  As `--check`, then, only after a successful read, provisions both
+  subscriptions and reads back. It writes even when slot 1 already matches:
+  the read cannot show slot 2, so a boot whose slot 2 write failed would
+  otherwise never write it again.
   - Refuses to write unless both traceability IMEIs are 15 digits, pass the Luhn
     check and differ.
   - A failed write or read-back is logged and the tool exits non-zero; no retry
