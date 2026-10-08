@@ -137,25 +137,19 @@ fn run() -> i32 {
     };
 
     let mut txn: u16 = 1;
-    let modem = match read_modem_imei(&client, server, &mut txn) {
-        Ok(Some(m)) => {
-            info(&format!(
-                "modem: read_ok=true provisioned=true luhn_valid={} matches_slot1={} matches_slot2={}",
-                m.is_luhn_valid(),
-                m == slot1,
-                m == slot2
-            ));
-            Some(m)
-        }
-        Ok(None) => {
-            info("modem: read_ok=true provisioned=false");
-            None
-        }
+    match read_modem_imei(&client, server, &mut txn) {
+        Ok(Some(m)) => info(&format!(
+            "modem: read_ok=true provisioned=true luhn_valid={} matches_slot1={} matches_slot2={}",
+            m.is_luhn_valid(),
+            m == slot1,
+            m == slot2
+        )),
+        Ok(None) => info("modem: read_ok=true provisioned=false"),
         Err(e) => {
             error(&format!("modem: read_ok=false reason={e}"));
             return 1;
         }
-    };
+    }
 
     if mode == Mode::Check {
         return 0;
@@ -166,15 +160,11 @@ fn run() -> i32 {
         error("write refused: traceability IMEIs did not validate");
         return 1;
     }
-    // Only write after a successful read, when NV 550 is unprovisioned or differs
-    // from slot 1. The stock read message carries no subscription selector, so
-    // slot 2 is provisioned alongside slot 1 and confirmed on the phone (*#06#).
-    let need_write = !matches!(&modem, Some(m) if *m == slot1);
-    if !need_write {
-        info("write: nothing to do (slot1 already matches modem)");
-        return 0;
-    }
-
+    // Only write after a successful read. Write both subscriptions even when NV
+    // 550 already matches slot 1: the stock read message carries no subscription
+    // selector, so it cannot show slot 2, and a boot whose slot 2 write failed
+    // would otherwise never retry it. Stock tctd also writes both at every boot;
+    // the write is idempotent. Slot 2 is confirmed on the phone (*#06#).
     let sub0_ok = write_slot(&client, server, &slot1, 0, &mut txn);
     let sub1_ok = write_slot(&client, server, &slot2, 1, &mut txn);
     let verify_ok = matches!(read_modem_imei(&client, server, &mut txn), Ok(Some(m)) if m == slot1);

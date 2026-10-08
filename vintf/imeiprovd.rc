@@ -3,8 +3,8 @@
 #
 # One-shot IMEI provisioning (finding -171). Reads the read-only traceability
 # partition, validates both IMEIs and compares them with the modem's current
-# NV 550 value. With --write it writes NV 550 for both subscriptions only when
-# the modem's value differs, then reads it back; it never touches the partition.
+# NV 550 value. With --write it then writes NV 550 for both subscriptions and
+# reads it back; it never touches the partition.
 # It runs at every boot, as stock tctd does: activating a slot (fastboot
 # --set-active, every OTA) makes the bootloader restore the modem's file system
 # from its golden copy, which has no IMEI, so NV 550 must be written again.
