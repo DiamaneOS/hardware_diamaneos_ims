@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The DiamaneOS Project
 
+package {
+    default_applicable_licenses: ["diamaneos_ims_license"],
+}
+
 // VINTF and init glue of the IMS DCM daemon. The daemon's binary module
 // installs them with
 //     vintf_fragment_modules: ["vendor.diamaneos.hardware.imsdcm.xml"],
