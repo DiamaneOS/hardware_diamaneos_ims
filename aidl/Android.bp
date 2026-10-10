@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The DiamaneOS Project
 
+package {
+    default_applicable_licenses: ["diamaneos_ims_license"],
+}
+
 // The one interface between the vendor IMS DCM daemon (Rust, server of
 // IImsDcm/default) and the system_ext broker app (Java, client, implements
 // IPdnBroker). VINTF-stable because it crosses the system/vendor boundary.

@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+
+package {
+    default_applicable_licenses: ["diamaneos_ims_license"],
+}
+
 aidl_interface {
     name: "de.diamaneos.wlan",
     srcs: ["de/diamaneos/wlan/*.aidl"],
