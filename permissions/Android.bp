@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The DiamaneOS Project
 
+package {
+    default_applicable_licenses: ["diamaneos_ims_license"],
+}
+
 // Allowlist and system configuration of the IMS network broker. System_ext
 // apps take their privileged-permission allowlist from
 // /system_ext/etc/permissions.

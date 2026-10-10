@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The DiamaneOS Project
 
+package {
+    default_applicable_licenses: ["diamaneos_ims_license"],
+}
+
 // IMS network broker: a system_ext privileged app that files the IMS and
 // emergency network requests the vendor IMS DCM daemon asks for.
 //
