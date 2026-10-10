@@ -7,24 +7,28 @@ reporting for native Qualcomm IWLAN. Android's IMS service and the modem's IMS
 signalling, voice and carrier emergency location are not replaced. Native and
 carrier behavior: see [verification](docs/verification.md).
 
+## Components
+
 - `dcm/`: memory-safe QMI DCM codec and bounded connection state machine
   (separate SIMs, shared address-family requests, reserved emergency capacity).
 - `daemon/`: QRTR/Binder adapter with a dedicated UID, enforcing policy, bounded
   queues, an arm64 syscall filter and an explicitly configured modem.
 - `broker/`: requests telephony's IMS/EIMS networks, including carrier IWLAN.
-  Reports restricted-bearer metadata only: no Internet, location or SMS
-  permission, no app traffic, no non-local sockets (SELinux). Its own UID's
-  VPN/firewall block does not describe the modem bearer.
+  - Reports restricted-bearer metadata only.
+  - No Internet, location or SMS permission, no app traffic, no non-local
+    sockets (SELinux).
+  - Its own UID's VPN/firewall block does not describe the modem bearer.
 - `wlan/`: bounded DSD protocol and acknowledgement state machine.
 - `wlan-runtime/`: isolated QRTR client and authenticated Binder snapshot adapter.
 - `wlan-observer/`: passive observation of the connected Wi-Fi link; no
   Internet, location or phone-state permission.
 - `integration/`: emergency-APN comparison tooling and source IWLAN provenance.
 - `imeiprov/`: one-shot [IMEI provisioning](docs/imei-provisioning.md)
-  (`imeiprovd`): reads the read-only traceability partition, writes modem NV 550
-  over the Fairphone TCL QMI service and, in other modes, sets the factory
-  Bluetooth address property and writes the WLAN driver's factory MAC file;
-  own vendor UID and SELinux domain.
+  (`imeiprovd`), with its own vendor UID and SELinux domain.
+  - Reads the read-only traceability partition and writes modem NV 550 over
+    the Fairphone TCL QMI service.
+  - In other modes, sets the factory Bluetooth address property and writes the
+    WLAN driver's factory MAC file.
 
 ## Wi-Fi calling
 
@@ -33,15 +37,11 @@ carrier behavior: see [verification](docs/verification.md).
   observations apart from modem access and completes supported notification
   requests without inventing quality results.
 - It is selected only by including `wlan-product.mk` and `wlan-board.mk`
-  alongside native Qualcomm IWLAN. User and userdebug builds use the same
-  protocol path.
-- Final native and device qualification is outstanding.
+  alongside native Qualcomm IWLAN.
 
-AML (Advanced Mobile Location) is not part of DiamaneOS. Its app
-([platform_packages_apps_EmergencyLocation](https://github.com/DiamaneOS/platform_packages_apps_EmergencyLocation))
-is not in the build and not needed to build or test this repository.
+AML (Advanced Mobile Location) is not part of DiamaneOS.
 
-## Development
+## Tests
 
 Needs Rust/Cargo, Python 3 and JDK 17 or later:
 
@@ -53,9 +53,9 @@ cargo fetch --locked
 - Host tests use synthetic inputs: no QRTR service, calls, SMS or emergency
   endpoints.
 - `tests/device-check --serial "$ANDROID_SERIAL" --iwlan qti` is a read-only
-  inventory of Android prerequisites for the native Qualcomm path (`--iwlan
-  aosp` only for a product selecting that alternative). It does not test
-  carrier registration or delivery.
+  inventory of Android prerequisites for the native Qualcomm path.
+  - `--iwlan aosp` is only for a product selecting that alternative.
+  - It does not test carrier registration or delivery.
 
 See also [architecture](docs/architecture.md), [protocol](docs/dcm-protocol.md)
 and [Android integration](docs/integration.md).
