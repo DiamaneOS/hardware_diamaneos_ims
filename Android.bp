@@ -38,8 +38,8 @@ rust_test_host {
 }
 // IMEI provisioning: pure decode/validate/codec library (host-testable) and the
 // one-shot vendor binary that reads the traceability partition and writes modem
-// NV 550 over the TCL QMI service (finding -171); other modes set the factory
-// Bluetooth address property (finding -177) and write the WLAN driver's factory
+// NV 550 over the TCL QMI service; other modes set the factory
+// Bluetooth address property and write the WLAN driver's factory
 // MAC file (--wlan-mac). See docs/imei-provisioning.md.
 rust_library {
     name: "libdiamaneos_imeiprov", crate_name: "diamaneos_imeiprov",

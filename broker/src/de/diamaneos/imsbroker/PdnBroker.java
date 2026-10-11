@@ -42,7 +42,7 @@ import java.util.List;
  *   <li>While the slot has no active subscription, the request waits and is filed on the next
  *       subscription change (startDataCall "pending list", updateSubInfoReady 0x010188). This
  *       applies to emergency requests too.
- *   <li>No timeout of our own: ConnectivityManager.requestNetwork() without one.
+ *   <li>No timeout in the broker: ConnectivityManager.requestNetwork() without one.
  *   <li>The request is held until the daemon releases it; a lost network does not drop it (Tracker
  *       callbacks 0x00f418 to 0x00f5fc, tearDownDataCall 0x0100ac).
  * </ul>

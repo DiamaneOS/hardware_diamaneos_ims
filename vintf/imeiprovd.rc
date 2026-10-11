@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The DiamaneOS Project
 #
-# One-shot IMEI provisioning (finding -171). Reads the read-only traceability
+# One-shot IMEI provisioning. Reads the read-only traceability
 # partition, validates both IMEIs and compares them with the modem's current
 # NV 550 value. With --write it then writes NV 550 for both subscriptions and
 # reads it back; it never touches the partition.
@@ -26,7 +26,7 @@ service vendor.imeiprovd /vendor/bin/imeiprovd --write ${ro.vendor.diamaneos.ims
     oneshot
     disabled
 
-# Factory Bluetooth address (finding -177). Reads the 6 address bytes from the
+# Factory Bluetooth address. Reads the 6 address bytes from the
 # traceability partition, validates them and sets
 # ro.vendor.diamaneos.bt.factory_address, which only this domain may set; the
 # device's Bluetooth init rc copies it to the property its HCI implementation
@@ -43,7 +43,7 @@ service vendor.imeiprovd-bt /vendor/bin/imeiprovd --bt-address
     oneshot
     disabled
 
-# Factory Wi-Fi MAC (finding -180). Reads the 6 MAC bytes from the
+# Factory Wi-Fi MAC. Reads the 6 MAC bytes from the
 # traceability partition, validates them and writes the WLAN driver's MAC file,
 # in stock's format, to a RAM-backed tree only this domain may write. The
 # device's ueventd.rc lists /mnt/vendor/wlan_mac/ as a firmware directory, so

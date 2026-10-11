@@ -2,10 +2,10 @@
 # Copyright 2026 The DiamaneOS Project
 #
 # imeiprovd (/vendor/bin/imeiprovd, user vendor_imeiprov, no supplementary
-# groups, no capabilities): the one-shot IMEI provisioning tool for finding -171.
+# groups, no capabilities): the one-shot IMEI provisioning tool.
 # It reads the two IMEIs from the read-only traceability partition and, in
 # --write mode, provisions modem NV 550 over the Fairphone TCL QMI service
-# (QRTR service 0x2ff). In --bt-address mode (finding -177) it reads the factory
+# (QRTR service 0x2ff). In --bt-address mode it reads the factory
 # Bluetooth address from the same partition and sets one property; in
 # --wlan-mac mode it reads the factory Wi-Fi MAC and writes the WLAN driver's
 # MAC file into a RAM-backed tree. It replaces the modem-NV and address parts

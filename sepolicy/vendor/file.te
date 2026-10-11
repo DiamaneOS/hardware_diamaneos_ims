@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The DiamaneOS Project
 #
-# The factory Wi-Fi MAC tree /mnt/vendor/wlan_mac (finding -180;
+# The factory Wi-Fi MAC tree /mnt/vendor/wlan_mac (see
 # file_contexts): RAM-backed (tmpfs), created by init and filled at every boot
 # by imeiprovd --wlan-mac (imeiprov.te), which only it may write. The device
 # lets ueventd read it, to serve the WLAN driver's MAC file as firmware. Not a

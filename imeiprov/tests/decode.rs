@@ -145,7 +145,7 @@ fn read_response_decodes_a_provisioned_imei() {
 
 #[test]
 fn read_response_reports_never_written() {
-    // What the FP6 modem answered on 2026-10-05: length 0, status 5.
+    // What the FP6 modem answers for an unwritten item: length 0, status 5.
     let frame = read_reply(0x20, message::NV_NOTACTIVE, &[]);
     assert_eq!(message::parse_imei_read_response(&frame, 0x20).unwrap(), None);
 }

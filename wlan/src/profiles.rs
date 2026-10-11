@@ -60,7 +60,7 @@ pub enum Change {
 }
 
 /// One verified QRTR subscription context. Replace the entire registry on context
-/// replacement. Forty is our capacity limit, not the firmware's total key space.
+/// replacement. Forty is this registry's capacity limit, not the firmware's total key space.
 pub struct Registry {
     context_generation: u64,
     entries: Vec<Entry>,

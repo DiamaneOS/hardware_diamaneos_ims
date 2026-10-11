@@ -46,8 +46,8 @@ other identifier.
 
 Why `--write` runs at every boot: activating a slot (`fastboot --set-active`,
 and every OTA) makes the bootloader restore the modem file system from its
-golden copy (fsg), which holds no IMEI, so NV 550 is unprovisioned again. Seen
-on the FP6 on 2026-10-05; a plain reboot or a bootloader round trip keeps it.
+golden copy (fsg), which holds no IMEI, so NV 550 is unprovisioned again. A
+plain reboot or a bootloader round trip keeps it.
 Stock `tctd` writes the IMEIs at every boot for the same reason.
 
 ## Bluetooth address (`--bt-address`)
