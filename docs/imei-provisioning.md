@@ -149,15 +149,19 @@ address.
 
 ## Tests
 
-`imeiprov/tests/decode.rs` covers decoding, Luhn validation, the NV 550 BCD
-codec (round trip and exact bytes), pair validation and the NV message
-build/parse paths, with synthetic IMEIs only (fake all-zero TACs with correct
-Luhn digits). `imeiprov/tests/bdaddr.rs` covers the Bluetooth address byte
-order, property format, validation and redaction, and
-`imeiprov/tests/wlanmac.rs` the Wi-Fi MAC's byte order, the exact MAC file
-(read back with a copy of the driver's parser), validation and redaction,
-with addresses from the RFC 7042 documentation range only. All run with the
-host tests (`./tests/run-host-tests.sh`).
+All run with the host tests (`./tests/run-host-tests.sh`), with synthetic
+values only: IMEIs with fake all-zero TACs and correct Luhn digits, addresses
+from the RFC 7042 documentation range.
+
+- `imeiprov/tests/decode.rs`: decoding, Luhn validation, the NV 550 BCD codec
+  (round trip and exact bytes), pair validation and the NV message build/parse
+  paths.
+- `imeiprov/tests/provision.rs`: the `--write` run with a fake modem, including
+  a failed slot 2 write that the next boot writes again, and failed reads.
+- `imeiprov/tests/bdaddr.rs`: the Bluetooth address byte order, property
+  format, validation and redaction.
+- `imeiprov/tests/wlanmac.rs`: the Wi-Fi MAC's byte order, the exact MAC file
+  (read back with a copy of the driver's parser), validation and redaction.
 
 ## Checking on a phone
 
