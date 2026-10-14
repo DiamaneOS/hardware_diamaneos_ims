@@ -435,17 +435,16 @@ fn dual_sim_ims_and_emergency_are_four_independent_requests() {
         serial: sos2_r.serial,
     };
     assert!(s.report(crossed, Some(dual(23))).is_empty());
-    // Losing SIM 1's IMS network ends only SIM 1's IMS context.
+    // Losing SIM 1's IMS network ends only SIM 1's IMS context. Its request
+    // stays filed for Android's retry.
     assert_eq!(
         s.report(ims1_r, None),
-        [
-            Seen::Ended {
-                to: MODEM,
-                pdp: ims1
-            },
-            Seen::Release(ims1_r)
-        ]
+        [Seen::Ended {
+            to: MODEM,
+            pdp: ims1
+        }]
     );
+    assert!(s.e.request_is_current(ims1_r));
     let c = dual(31);
     assert_eq!(
         s.report(sos1_r, Some(c.clone())),
@@ -482,15 +481,12 @@ fn no_sim_emergency_is_separate_from_a_sim_emergency() {
         );
         assert_eq!(
             s.report(any_r, None),
-            [
-                Seen::Ended {
-                    to: MODEM,
-                    pdp: any
-                },
-                Seen::Release(any_r)
-            ]
+            [Seen::Ended {
+                to: MODEM,
+                pdp: any
+            }]
         );
-        assert!(s.e.request_is_current(sim_r));
+        assert!(s.e.request_is_current(any_r) && s.e.request_is_current(sim_r));
         assert_eq!(s.e.session_count(), 1);
         let n = dual(41);
         assert_eq!(
@@ -538,8 +534,8 @@ fn ims_and_emergency_on_one_sim_never_share_a_network() {
     }
     // Losing IMS ends both IMS contexts and nothing else.
     let out = s.report(ims_r, None);
-    assert_eq!(out.len(), 3);
-    assert_eq!(released(&out), [ims_r]);
+    assert_eq!(out.len(), 2);
+    assert!(released(&out).is_empty());
     assert!(out.contains(&Seen::Ended {
         to: MODEM,
         pdp: ims4
@@ -848,23 +844,40 @@ fn emergency_deactivation_then_reactivation_files_a_new_request_each_time() {
 }
 
 #[test]
-fn emergency_network_loss_ends_the_context_and_the_retry_refiles() {
+fn emergency_network_loss_ends_the_context_and_keeps_the_request_for_the_retry() {
     let mut s = Sim::new();
     let (pdp, r) = s.open(MODEM, eims(1));
     s.report(r, Some(dual(3)));
+    assert_eq!(s.report(r, None), [Seen::Ended { to: MODEM, pdp }]);
+    // Android's retry restores the network, and the modem's next activation
+    // is answered at once from the same request.
+    let n = dual(4);
+    assert!(s.report(r, Some(n.clone())).is_empty());
+    let out = s.activate(MODEM, eims(1));
+    assert!(bring_ups(&out).is_empty());
+    let again = accepted(&out);
     assert_eq!(
-        s.report(r, None),
-        [Seen::Ended { to: MODEM, pdp }, Seen::Release(r)]
+        out[1..],
+        [Seen::Up {
+            to: MODEM,
+            pdp: again,
+            address: v4(&n)
+        }]
     );
-    let (_, again) = s.open(MODEM, eims(1));
-    assert!(again.serial > r.serial);
     // An invalid network is a loss, never an "up" with a bad address.
-    let mut bad = dual(4);
+    let mut bad = dual(5);
     bad.v4 = Some(Ipv4Addr::LOCALHOST);
-    assert!(matches!(
-        s.report(again, Some(bad))[..],
-        [Seen::Ended { .. }, Seen::Release(_)]
-    ));
+    assert_eq!(
+        s.report(r, Some(bad)),
+        [Seen::Ended {
+            to: MODEM,
+            pdp: again
+        }]
+    );
+    // A failure report, unlike a loss, releases the request.
+    assert_eq!(seen(s.e.failed(r)), [Seen::Release(r)]);
+    let (_, refiled) = s.open(MODEM, eims(1));
+    assert!(refiled.serial > r.serial);
 }
 
 #[test]
@@ -1039,6 +1052,7 @@ enum Op {
     Destroy,
     Up,
     Down,
+    Failed,
     Stale,
     BrokerLost,
     BrokerBack,
@@ -1055,7 +1069,8 @@ const CHURN: &[(u64, Op)] = &[
     (120, Op::Deactivate),
     (20, Op::Destroy),
     (180, Op::Up),
-    (60, Op::Down),
+    (45, Op::Down),
+    (15, Op::Failed),
     (40, Op::Stale),
     (20, Op::BrokerLost),
     (70, Op::BrokerBack),
@@ -1071,7 +1086,8 @@ const PRESSURE: &[(u64, Op)] = &[
     (40, Op::Repeat),
     (60, Op::Deactivate),
     (90, Op::Up),
-    (5, Op::Down),
+    (3, Op::Down),
+    (2, Op::Failed),
     (30, Op::Stale),
     (2, Op::BrokerLost),
     (30, Op::BrokerBack),
@@ -1089,6 +1105,7 @@ struct Coverage {
     kill_refusals: u64,
     stale_reports: u64,
     refiled_after_broker_return: u64,
+    answered_from_held: u64,
 }
 
 struct Model {
@@ -1098,6 +1115,8 @@ struct Model {
     pending: BTreeMap<u16, Act>,
     live: BTreeMap<(Peer, u8), Act>,
     held: BTreeMap<Key, Request>,
+    // Clients and instances whose contexts a network loss ended.
+    waiting: BTreeMap<Key, BTreeSet<(Peer, u32)>>,
     networks: BTreeMap<Key, Network>,
     history: Vec<Request>,
     newest: i32,
@@ -1115,6 +1134,7 @@ impl Model {
             pending: BTreeMap::new(),
             live: BTreeMap::new(),
             held: BTreeMap::new(),
+            waiting: BTreeMap::new(),
             networks: BTreeMap::new(),
             history: vec![],
             newest: 0,
@@ -1167,8 +1187,32 @@ impl Model {
             ),
         }
     }
+    /// Requests that must stay filed: a live context or a hold uses them.
     fn keys(&self) -> BTreeSet<Key> {
-        self.live.values().map(Act::key).collect()
+        let mut keys: BTreeSet<_> = self.live.values().map(Act::key).collect();
+        keys.extend(
+            self.waiting
+                .iter()
+                .filter(|(_, holders)| !holders.is_empty())
+                .map(|(key, _)| *key),
+        );
+        keys
+    }
+    /// A loss turns the key's live contexts into holds.
+    fn hold(&mut self, key: Key) {
+        let holders: Vec<_> = self
+            .live
+            .iter()
+            .filter(|(_, a)| a.key() == key)
+            .map(|((peer, _), a)| (*peer, a.instance.unwrap_or(0)))
+            .collect();
+        self.waiting.entry(key).or_default().extend(holders);
+    }
+    fn release_holds(&mut self, drop: impl Fn(Key, Peer, u32) -> bool) {
+        for (key, holders) in &mut self.waiting {
+            holders.retain(|&(peer, instance)| !drop(*key, peer, instance));
+        }
+        self.waiting.retain(|_, holders| !holders.is_empty());
     }
     fn expected_address(&self, act: &Act) -> Option<IpAddr> {
         let n = self.networks.get(&act.key())?;
@@ -1232,6 +1276,12 @@ impl Model {
                     } else if act.emergency && normal >= NORMAL_CAP {
                         self.coverage.emergency_at_normal_cap += 1;
                     }
+                    if repeat.is_none()
+                        && self.waiting.contains_key(&act.key())
+                        && !self.live.values().any(|a| a.key() == act.key())
+                    {
+                        self.coverage.answered_from_held += 1;
+                    }
                     let files = repeat.is_none() && !before.contains(&act.key()) && self.broker;
                     assert_eq!(bring_ups(&out).len(), usize::from(files), "{out:?}");
                 }
@@ -1282,11 +1332,13 @@ impl Model {
         assert_eq!(
             gone,
             before.difference(&after).copied().collect::<Vec<_>>(),
-            "release exactly the requests whose last context ended: {out:?}"
+            "release exactly the requests no context or hold still uses: {out:?}"
         );
         assert_eq!(self.s.e.session_count(), self.live.len());
         let d = self.s.e.diagnostics();
         assert_eq!(d.active_groups, after.len());
+        let live_keys: BTreeSet<_> = self.live.values().map(Act::key).collect();
+        assert_eq!(d.held_groups, after.difference(&live_keys).count());
         assert!(self.live.values().filter(|a| !a.emergency).count() <= NORMAL_CAP);
         assert!(self.emergency || self.live.values().all(|a| !a.emergency));
         if self.broker {
@@ -1329,18 +1381,24 @@ impl Model {
                     // An unknown ID, or another client's: refused, changes nothing.
                     _ => (self.peer(), 20 + self.next(79) as u8, None),
                 };
-                let owned = self.live.contains_key(&(peer, pdp));
+                let owned = self.live.get(&(peer, pdp)).copied();
+                let before = self.keys();
                 let out = self.s.e.receive(peer, &deactivate(txn, pdp, instance));
-                if !owned {
-                    assert!(matches!(seen_ref(&out)[..], [Seen::Refused { .. }]));
+                match owned {
+                    Some(act) => {
+                        let (key, held) = (act.key(), act.instance.unwrap_or(0));
+                        self.release_holds(|k, p, i| k == key && p == peer && i == held);
+                    }
+                    None => assert!(matches!(seen_ref(&out)[..], [Seen::Refused { .. }])),
                 }
-                self.apply(out, None);
+                self.apply_from(before, out, None);
             }
             Op::Destroy => {
                 let (peer, instance) = (self.peer(), self.next(2) as u32);
                 let before = self.keys();
                 self.live
                     .retain(|(p, _), a| !(*p == peer && a.instance.unwrap_or(0) == instance));
+                self.release_holds(|_, p, i| p == peer && i == instance);
                 let txn = self.s.next();
                 let out = self.s.e.receive(peer, &destroy(txn, instance));
                 self.apply_from(before, out, None);
@@ -1351,7 +1409,9 @@ impl Model {
                     if n.valid() {
                         self.networks.insert(r.key, n.clone());
                     } else {
+                        // An invalid network is a loss.
                         self.networks.remove(&r.key);
+                        self.hold(r.key);
                     }
                     let out = self.s.e.report(r, Some(n));
                     self.apply(out, None);
@@ -1360,8 +1420,18 @@ impl Model {
             Op::Down => {
                 if let Some(r) = self.pick_held() {
                     self.networks.remove(&r.key);
+                    self.hold(r.key);
                     let out = self.s.e.report(r, None);
                     self.apply(out, None);
+                }
+            }
+            Op::Failed => {
+                if let Some(r) = self.pick_held() {
+                    let before = self.keys();
+                    self.networks.remove(&r.key);
+                    self.release_holds(|key, _, _| key == r.key);
+                    let out = self.s.e.failed(r);
+                    self.apply_from(before, out, None);
                 }
             }
             Op::Stale => {
@@ -1377,11 +1447,13 @@ impl Model {
             }
             Op::BrokerLost => {
                 if self.broker {
+                    let before = self.keys();
                     self.broker = false;
                     self.held.clear();
+                    self.waiting.clear();
                     self.networks.clear();
                     let out = self.s.e.broker_lost();
-                    self.apply(out, None);
+                    self.apply_from(before, out, None);
                 }
             }
             Op::BrokerBack => {
@@ -1400,20 +1472,26 @@ impl Model {
                     return;
                 }
                 self.emergency = !self.emergency;
+                let before = self.keys();
+                if !self.emergency {
+                    self.release_holds(|key, _, _| key.kind == PdnType::Emergency);
+                }
                 let out = self.s.e.set_emergency_enabled(self.emergency);
-                self.apply(out, None);
+                self.apply_from(before, out, None);
                 assert!(self.s.e.set_emergency_enabled(self.emergency).is_empty());
             }
             Op::PeerGone => {
                 let peer = self.peer();
                 let before = self.keys();
                 self.live.retain(|(p, _), _| *p != peer);
+                self.release_holds(|_, p, _| p == peer);
                 let out = self.s.e.peer_gone(peer);
                 self.apply_from(before, out, None);
             }
             Op::ModemGone => {
                 let before = self.keys();
                 self.live.clear();
+                self.waiting.clear();
                 let out = self.s.e.node_gone(MODEM.node);
                 self.apply_from(before, out, None);
             }
@@ -1469,6 +1547,7 @@ fn walk(ops: &'static [(u64, Op)], seeds: std::ops::RangeInclusive<u64>) -> Cove
         total.kill_refusals += c.kill_refusals;
         total.stale_reports += c.stale_reports;
         total.refiled_after_broker_return += c.refiled_after_broker_return;
+        total.answered_from_held += c.answered_from_held;
     }
     total
 }
@@ -1485,6 +1564,7 @@ fn randomised_emergency_lifecycle_model_check() {
         "{}",
         c.refiled_after_broker_return
     );
+    assert!(c.answered_from_held > 1_500, "{}", c.answered_from_held);
 }
 
 #[test]
@@ -1497,4 +1577,5 @@ fn randomised_emergency_capacity_model_check() {
         c.emergency_at_normal_cap
     );
     assert!(c.emergency_up > 8_000, "{}", c.emergency_up);
+    assert!(c.answered_from_held > 60, "{}", c.answered_from_held);
 }

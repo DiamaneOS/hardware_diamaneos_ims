@@ -18,6 +18,8 @@ Each process runs as its own identity:
   generation serials.
 - Address disappearance, network loss and unavailable requests never produce a
   success address.
+- A lost network ends the modem's contexts but keeps the Android request, as
+  on stock, so Android's retry can restore it for the modem's next activation.
 - No custom emergency setup timeout competes with the modem's retry policy.
 - Vendor Rust Binder does not expose caller SELinux IDs. So the daemon refuses
   permissive SELinux, policy limits registration and calls to the broker

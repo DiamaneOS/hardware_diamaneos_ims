@@ -50,17 +50,18 @@ interface IImsDcm {
     oneway void onPdnUp(in PdnRequest request, in PdnInfo info);
 
     /**
-     * The network for the request was lost. The daemon withdraws the affected
-     * modem sessions and releases the broker request after its last reference.
-     * A later modem activation creates a fresh request/serial; a late up callback
-     * cannot revive this released request.
+     * The network for the request was lost. The broker still holds the
+     * request, so onPdnUp() follows if Android brings a network back. As on
+     * stock, the daemon ends the affected modem sessions but keeps the
+     * request until the modem releases it or goes away. The modem's next
+     * activation for the same slot and type uses it, with the same serial.
      */
     oneway void onPdnDown(in PdnRequest request);
 
     /**
      * The broker could not file the request, or Android declared it
-     * unavailable. The broker holds nothing for it any more; a new bringUp()
-     * is needed to try again.
+     * unavailable. The broker holds nothing for it any more. The daemon ends
+     * its sessions, and a new bringUp() is needed to try again.
      */
     oneway void onPdnFailed(in PdnRequest request, PdnFailure reason);
 }

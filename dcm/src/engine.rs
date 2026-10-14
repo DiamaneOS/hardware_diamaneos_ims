@@ -5,7 +5,7 @@ use crate::outgoing::{
     self, Disposition, Fence, Packet, PeerLife, Retained, SidLife, SidStamp, UpSnapshot,
 };
 use crate::protocol::{self as p, Activation, Family, Frame, Kind, PdnType};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 // The authenticated stock DCM contract allocates PDP IDs in this inclusive range.
@@ -92,6 +92,9 @@ struct Session {
 struct Group {
     request: Request,
     network: Option<Network>,
+    // Clients and instances whose contexts a network loss ended. As on stock,
+    // the request stays filed for them until they release it or go away.
+    holds: BTreeSet<(Peer, u32)>,
 }
 /// Bounded lifecycle metadata only: no addresses, APNs, handles or peer identities.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -99,6 +102,8 @@ pub struct Diagnostics {
     pub broker_connected: bool,
     pub active_sessions: usize,
     pub active_groups: usize,
+    // Requests kept filed after a network loss with no context yet.
+    pub held_groups: usize,
     pub sessions_by_slot: [usize; 4], // unspecified, then slots 0..2
     // Same slot indexing; counts only, never session or peer identifiers.
     // Requests include duplicates and admission failures; releases count
@@ -113,6 +118,8 @@ pub struct Diagnostics {
     pub last_request: u16,
     pub up_reports: u64,
     pub down_reports: u64,
+    // Requests the broker no longer holds: refused or unavailable.
+    pub failed_reports: u64,
     pub stale_reports: u64,
     pub broker_registrations: u64,
     pub broker_losses: u64,
@@ -191,6 +198,11 @@ impl Engine {
         result.broker_connected = self.broker;
         result.active_sessions = self.sessions.len();
         result.active_groups = self.groups.len();
+        result.held_groups = self
+            .groups
+            .keys()
+            .filter(|key| !self.group_in_use(**key))
+            .count();
         for session in &self.sessions {
             // Activation validates the slot before creating a session.
             result.sessions_by_slot[(session.activation.slot + 1) as usize] += 1;
@@ -393,11 +405,14 @@ impl Engine {
     pub fn broker_lost(&mut self) -> Vec<Effect> {
         self.diagnostics.broker_losses = self.diagnostics.broker_losses.saturating_add(1);
         self.broker = false;
+        // The broker's requests end with it, so none stays held.
+        self.drop_holds(|_, _, _| true);
         let peers: Vec<_> = self.indications.keys().copied().collect();
         let mut out = vec![];
         for peer in peers {
             out.extend(self.fail_matching(|s| s.peer == peer));
         }
+        out.extend(self.release_unused());
         out
     }
     /// A oneway bring-up the live broker did not receive can never be answered
@@ -408,6 +423,19 @@ impl Engine {
         if !self.request_is_current(request) {
             return vec![];
         }
+        self.drop_holds(|key, _, _| key == request.key);
+        self.fail_matching(|s| Self::group_key(&s.activation) == request.key)
+    }
+    /// The broker no longer holds the request: it was refused or Android
+    /// declared it unavailable. End its contexts and release it. The modem's
+    /// next activation files a new one.
+    pub fn failed(&mut self, request: Request) -> Vec<Effect> {
+        if !self.request_is_current(request) {
+            self.diagnostics.stale_reports = self.diagnostics.stale_reports.saturating_add(1);
+            return vec![];
+        }
+        self.diagnostics.failed_reports = self.diagnostics.failed_reports.saturating_add(1);
+        self.drop_holds(|key, _, _| key == request.key);
         self.fail_matching(|s| Self::group_key(&s.activation) == request.key)
     }
     /// The group is already gone. The broker adopts its held request again on
@@ -421,6 +449,7 @@ impl Engine {
         if enabled {
             vec![]
         } else {
+            self.drop_holds(|key, _, _| key.kind == PdnType::Emergency);
             self.fail_matching(|s| s.activation.pdn_type == PdnType::Emergency)
         }
     }
@@ -430,6 +459,7 @@ impl Engine {
         }
         self.sessions.retain(|s| s.peer != peer);
         self.indications.remove(&peer);
+        self.drop_holds(|_, holder, _| holder == peer);
         self.release_unused()
     }
     /// Backpressure from a client that has not gone: end its sessions with
@@ -439,6 +469,7 @@ impl Engine {
         if self.sessions.iter().any(|s| s.peer == peer) {
             self.diagnostics.client_stalls = self.diagnostics.client_stalls.saturating_add(1);
         }
+        self.drop_holds(|_, holder, _| holder == peer);
         self.fail_matching(|s| s.peer == peer)
     }
     pub fn node_gone(&mut self, node: u32) -> Vec<Effect> {
@@ -447,24 +478,33 @@ impl Engine {
         }
         self.sessions.retain(|s| s.peer.node != node);
         self.indications.retain(|p, _| p.node != node);
+        self.drop_holds(|_, holder, _| holder.node == node);
         self.release_unused()
     }
     pub fn shutdown(&mut self) -> Vec<Effect> {
         self.sessions.clear();
         self.indications.clear();
+        self.drop_holds(|_, _, _| true);
         self.release_unused()
+    }
+    fn drop_holds(&mut self, drop: impl Fn(Key, Peer, u32) -> bool) {
+        for (key, group) in &mut self.groups {
+            group
+                .holds
+                .retain(|&(holder, instance)| !drop(*key, holder, instance));
+        }
+    }
+    fn group_in_use(&self, key: Key) -> bool {
+        self.sessions
+            .iter()
+            .any(|s| Self::group_key(&s.activation) == key)
     }
     fn release_unused(&mut self) -> Vec<Effect> {
         let keys: Vec<_> = self
             .groups
-            .keys()
-            .filter(|k| {
-                !self
-                    .sessions
-                    .iter()
-                    .any(|s| Self::group_key(&s.activation) == **k)
-            })
-            .copied()
+            .iter()
+            .filter(|(key, group)| group.holds.is_empty() && !self.group_in_use(**key))
+            .map(|(key, _)| *key)
             .collect();
         keys.into_iter()
             .filter_map(|k| self.groups.remove(&k).map(|g| Effect::Release(g.request)))
@@ -505,7 +545,7 @@ impl Engine {
         }
         let Some(network) = network.filter(Network::valid) else {
             self.diagnostics.down_reports = self.diagnostics.down_reports.saturating_add(1);
-            return self.fail_matching(|s| Self::group_key(&s.activation) == request.key);
+            return self.network_lost(request.key);
         };
         self.diagnostics.up_reports = self.diagnostics.up_reports.saturating_add(1);
         self.groups.get_mut(&request.key).unwrap().network = Some(network.clone());
@@ -563,6 +603,27 @@ impl Engine {
         out.extend(self.release_unused());
         out
     }
+    /// Stock sends each context of a lost network the terminal result and frees
+    /// its PDP ID, but keeps the request filed until the modem releases it.
+    /// Android's own retry can then bring the bearer back, on either transport,
+    /// for the modem's next activation.
+    fn network_lost(&mut self, key: Key) -> Vec<Effect> {
+        let holders: Vec<_> = self
+            .sessions
+            .iter()
+            .filter(|s| Self::group_key(&s.activation) == key)
+            .map(|s| (s.peer, s.activation.instance.unwrap_or(0)))
+            .collect();
+        let group = self.groups.get_mut(&key).expect("current request");
+        group.network = None;
+        group.holds.extend(holders);
+        // Bounded like the sessions, whatever instance numbers the modem uses.
+        // Trimming a full set never empties it, so it cannot release the request.
+        while group.holds.len() > MAX_SESSIONS {
+            group.holds.pop_first();
+        }
+        self.fail_matching(|s| Self::group_key(&s.activation) == key)
+    }
     /// No reply to non-modem peers, indications, or frames too short to identify.
     pub fn receive(&mut self, peer: Peer, bytes: &[u8]) -> Vec<Effect> {
         if peer.node != self.modem_node || peer.port == 0 || peer.port >= 0xffff_fffe {
@@ -614,6 +675,7 @@ impl Engine {
                     }
                     !remove
                 });
+                self.drop_holds(|_, holder, held| holder == peer && held == instance);
                 let mut out = vec![self.reply(peer, p::response(frame.txn, frame.id, 0, 0), None)];
                 out.extend(self.release_unused());
                 out
@@ -730,6 +792,7 @@ impl Engine {
                 Group {
                     request,
                     network: None,
+                    holds: BTreeSet::new(),
                 },
             );
             if self.broker {
@@ -782,6 +845,12 @@ impl Engine {
             self.diagnostics.modem_releases_by_slot[slot] =
                 self.diagnostics.modem_releases_by_slot[slot].saturating_add(1);
             let session = self.sessions.remove(i);
+            // The client's own release also ends a hold it left after a loss.
+            let (key, held) = (
+                Self::group_key(&session.activation),
+                session.activation.instance.unwrap_or(0),
+            );
+            self.drop_holds(|k, holder, instance| k == key && holder == peer && instance == held);
             out.extend(
                 self.release_unused()
                     .into_iter()
