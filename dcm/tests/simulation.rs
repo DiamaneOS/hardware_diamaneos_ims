@@ -659,10 +659,19 @@ fn lifecycle_diagnostics_distinguish_release_stale_report_and_reactivation() {
     assert_eq!(up.sessions_by_slot, [0, 1, 0, 0]);
     assert_eq!((up.requests, up.up_reports, up.down_reports), (1, 1, 0));
     engine.report(r, None);
+    let held = engine.diagnostics();
+    assert_eq!(
+        (held.active_sessions, held.active_groups, held.held_groups),
+        (0, 1, 1)
+    );
+    engine.failed(r);
     engine.report(r, Some(network())); // Late callback must not resurrect the group.
     let down = engine.diagnostics();
     assert_eq!((down.active_sessions, down.active_groups), (0, 0));
-    assert_eq!((down.down_reports, down.stale_reports), (1, 1));
+    assert_eq!(
+        (down.down_reports, down.failed_reports, down.stale_reports),
+        (1, 1, 1)
+    );
     assert_eq!(down.modem_releases_by_slot, [0; 4]);
     assert_eq!(down.missing_family_releases_by_slot, [0; 4]);
     engine.peer_gone(MODEM); // A known client can disappear after releasing its last session.
@@ -678,4 +687,211 @@ fn lifecycle_diagnostics_distinguish_release_stale_report_and_reactivation() {
     assert_eq!(lost.active_groups, 0);
     engine.receive(MODEM, &[0]);
     assert_eq!(engine.diagnostics().malformed, 1);
+}
+
+// Network loss keeps the request, as stock does
+
+fn terminals(effects: &[Effect]) -> Vec<u8> {
+    effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::Send(_, b) => {
+                let f = Frame::parse(b).ok()?;
+                (f.kind == Kind::Indication && f.tlv(2) == Some([0, 0, 13, 0].as_slice()))
+                    .then(|| f.tlv(1).unwrap()[0])
+            }
+            _ => None,
+        })
+        .collect()
+}
+fn releases(effects: &[Effect]) -> Vec<Request> {
+    effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::Release(r) | Effect::ReleaseAfter { request: r, .. } => Some(*r),
+            _ => None,
+        })
+        .collect()
+}
+fn files(effects: &[Effect]) -> bool {
+    effects.iter().any(|e| matches!(e, Effect::BringUp(_)))
+}
+/// An initial result with this address, never an address change.
+fn initial_up(effect: &Effect, address: &str) -> bool {
+    let Effect::Send(_, b) = effect else {
+        return false;
+    };
+    let f = Frame::parse(b).unwrap();
+    (f.kind, f.id) == (Kind::Indication, ACTIVATE)
+        && f.tlv(2) == Some([0, 0, 0, 0].as_slice())
+        && b.windows(address.len()).any(|w| w == address.as_bytes())
+}
+fn wifi() -> Network {
+    Network {
+        handle: 43,
+        v4: Some(Ipv4Addr::new(198, 51, 100, 7)),
+        v6: Some("2001:db8:1::7".parse::<Ipv6Addr>().unwrap()),
+        mtu: 1280,
+    }
+}
+fn destroy(instance: u32) -> Vec<u8> {
+    let mut e = Encoder::new(Kind::Request, 66, 0x33);
+    e.tlv(1, &instance.to_le_bytes()).unwrap();
+    e.finish()
+}
+
+#[test]
+fn failed_handover_keeps_the_request_for_the_modems_next_activation() {
+    // A failed LTE to Wi-Fi handover makes telephony tear the LTE network down
+    // and retry on Wi-Fi for the same request. The request must still be there.
+    let mut e = connected();
+    let v4 = e.receive(MODEM, &activate(1, 1, 0, false, 0));
+    let r = request(&v4);
+    let v6 = e.receive(MODEM, &activate(2, 1, 1, false, 0));
+    assert_eq!(e.report(r, Some(network())).len(), 2);
+    let lost = e.report(r, None);
+    assert_eq!(terminals(&lost), [pdp(&v4), pdp(&v6)]);
+    assert!(releases(&lost).is_empty());
+    assert!(e.request_is_current(r));
+    let d = e.diagnostics();
+    assert_eq!(
+        (d.active_sessions, d.active_groups, d.held_groups),
+        (0, 1, 1)
+    );
+    // The retry brings the network back over Wi-Fi before the modem asks again.
+    assert!(e.report(r, Some(wifi())).is_empty());
+    let mut ids = vec![];
+    for (txn, family, address) in [(3, 0, "198.51.100.7"), (4, 1, "2001:db8:1::7")] {
+        let out = e.receive(MODEM, &activate(txn, 1, family, false, 0));
+        assert!(!files(&out), "the held request serves the new context");
+        assert_eq!(out.len(), 2);
+        assert!(initial_up(&out[1], address));
+        ids.push(pdp(&out));
+    }
+    assert_eq!(e.diagnostics().held_groups, 0);
+    // The modem's own release still ends the request with its last context.
+    assert!(releases(&e.receive(MODEM, &deactivate(ids[0]))).is_empty());
+    assert_eq!(releases(&e.receive(MODEM, &deactivate(ids[1]))), [r]);
+    assert_eq!(e.diagnostics().active_groups, 0);
+}
+
+#[test]
+fn activation_during_the_loss_waits_for_the_returning_network() {
+    let mut e = connected();
+    let first = e.receive(MODEM, &activate(1, 2, 1, false, 0));
+    let r = request(&first);
+    e.report(r, Some(network()));
+    e.report(r, None);
+    // Acknowledged only: no second filing and no result without a network.
+    let again = e.receive(MODEM, &activate(2, 2, 1, false, 0));
+    assert_eq!(again.len(), 1);
+    // The same address on the returning network is a fresh initial result.
+    let up = e.report(r, Some(network()));
+    assert_eq!(up.len(), 1);
+    assert!(initial_up(&up[0], "2001:db8::1"));
+}
+
+#[test]
+fn a_failure_report_releases_the_request_unlike_a_loss() {
+    let mut e = connected();
+    let a = e.receive(MODEM, &activate(1, 1, 0, false, 0));
+    let r = request(&a);
+    let stale = Request {
+        serial: r.serial + 1,
+        ..r
+    };
+    assert!(e.failed(stale).is_empty());
+    let out = e.failed(r);
+    assert_eq!(terminals(&out), [pdp(&a)]);
+    assert_eq!(releases(&out), [r]);
+    // A request held after a loss is released by a failure too.
+    let b = e.receive(MODEM, &activate(2, 1, 0, false, 0));
+    let held = request(&b);
+    assert!(held.serial > r.serial);
+    e.report(held, None);
+    assert_eq!(releases(&e.failed(held)), [held]);
+    let d = e.diagnostics();
+    assert_eq!(
+        (d.failed_reports, d.stale_reports, d.active_groups),
+        (2, 1, 0)
+    );
+}
+
+#[test]
+fn a_held_request_ends_with_whatever_ends_its_holder() {
+    let other = Peer {
+        node: MODEM.node,
+        port: MODEM.port + 1,
+    };
+    type End = fn(&mut Engine, Request) -> Vec<Effect>;
+    let ends: [(&str, End); 6] = [
+        ("client gone", |e, _| e.peer_gone(MODEM)),
+        ("modem gone", |e, _| e.node_gone(MODEM.node)),
+        ("shutdown", |e, _| e.shutdown()),
+        ("broker lost", |e, _| e.broker_lost()),
+        ("request failed", |e, r| e.failed(r)),
+        ("instance destroyed", |e, _| e.receive(MODEM, &destroy(0))),
+    ];
+    for (what, end) in ends {
+        let mut e = connected();
+        let a = e.receive(MODEM, &activate(1, 1, 0, false, 0));
+        let r = request(&a);
+        e.report(r, None);
+        // None of these belong to the holder, so the request stays.
+        assert_eq!(e.receive(MODEM, &deactivate(pdp(&a))).len(), 1, "{what}");
+        assert!(e.peer_gone(other).is_empty(), "{what}");
+        assert!(
+            releases(&e.receive(MODEM, &destroy(1))).is_empty(),
+            "{what}"
+        );
+        assert!(e.set_emergency_enabled(false).is_empty(), "{what}");
+        assert!(e.request_is_current(r), "{what}");
+        assert_eq!(releases(&end(&mut e, r)), [r], "{what}");
+        assert_eq!(e.diagnostics().active_groups, 0, "{what}");
+    }
+    // The kill switch ends a held emergency request.
+    let mut e = connected();
+    let a = e.receive(MODEM, &activate(1, 1, 0, true, 0));
+    let r = request(&a);
+    e.report(r, None);
+    assert_eq!(releases(&e.set_emergency_enabled(false)), [r]);
+}
+
+#[test]
+fn a_shared_request_stays_held_until_every_holder_lets_go() {
+    let other = Peer {
+        node: MODEM.node,
+        port: MODEM.port + 1,
+    };
+    let mut e = connected();
+    let a = e.receive(MODEM, &activate(1, 1, 0, false, 0));
+    let r = request(&a);
+    e.receive(other, &activate(2, 1, 1, false, 0));
+    e.report(r, Some(network()));
+    assert_eq!(terminals(&e.report(r, None)).len(), 2);
+    assert!(e.peer_gone(other).is_empty());
+    let again = e.receive(MODEM, &activate(3, 1, 0, false, 0));
+    assert!(!files(&again));
+    assert_eq!(releases(&e.receive(MODEM, &deactivate(pdp(&again)))), [r]);
+}
+
+#[test]
+fn holds_stay_bounded_across_many_instances_and_losses() {
+    let mut e = connected();
+    let mut r = None;
+    for instance in 0..300u32 {
+        let original = activate(1, 1, 0, false, 0);
+        let parsed = Frame::parse(&original).unwrap();
+        let mut owned = Encoder::new(Kind::Request, instance as u16, ACTIVATE);
+        owned.tlv(1, parsed.required(1).unwrap()).unwrap();
+        owned.tlv(0x12, parsed.required(0x12).unwrap()).unwrap();
+        owned.tlv(0x13, &instance.to_le_bytes()).unwrap();
+        let out = e.receive(MODEM, &owned.finish());
+        let current = *r.get_or_insert_with(|| request(&out));
+        assert!(!files(&out) || instance == 0);
+        assert_eq!(terminals(&e.report(current, None)).len(), 1);
+    }
+    let r = r.unwrap();
+    assert!(e.request_is_current(r));
+    assert_eq!(releases(&e.peer_gone(MODEM)), [r]);
 }

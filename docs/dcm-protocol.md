@@ -36,10 +36,16 @@
   bytes.
 - Normal and emergency Android capabilities are separate. The core never
   supplies a fabricated fallback IP address.
+- Network loss, as on stock: each affected context gets the terminal result
+  and its PDP ID is freed, but the Android request stays filed so Android's
+  retry can bring the bearer back. The modem's next activation for that slot
+  and type uses it and is answered at once if the network is back. The
+  client's own deactivation, instance destruction or loss, a broker failure
+  report, broker loss and the emergency switch release it.
 - Stricter than stock, on purpose: ambiguous duplicate TLVs, invalid slots,
   unusable addresses, exhausted capacity and stale broker reports are rejected.
-  Broker/network loss is reported as failure and clears the held sessions.
-  These choices need modem compatibility checks.
+  Broker loss is reported as failure and clears the held sessions and
+  requests. These choices need modem compatibility checks.
 
 ## WLAN timezone reply
 

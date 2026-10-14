@@ -48,6 +48,8 @@ enum Event {
     Register(u64, Strong<dyn IPdnBroker>, DeathRecipient),
     Lost(u64),
     Report(u64, Request, Option<Network>),
+    // The broker no longer holds the request, unlike a down report.
+    Failed(u64, Request),
 }
 struct Service {
     sender: SyncSender<Event>,
@@ -195,7 +197,10 @@ impl IImsDcm for Service {
         ))
     }
     fn onPdnFailed(&self, r: &PdnRequest, _why: PdnFailure) -> binder::Result<()> {
-        self.onPdnDown(r)
+        if app_uid() != Some(self.broker_uid.load(Ordering::Acquire)) {
+            return Err(denied());
+        }
+        self.enqueue(Event::Failed(self.epoch.load(Ordering::Acquire), key(r)?))
     }
 }
 fn prop(name: &str) -> Option<String> {
@@ -371,6 +376,13 @@ fn run() -> io::Result<()> {
                     Event::Report(epoch, r, n) => {
                         if broker.as_ref().is_some_and(|b| b.0 == epoch) {
                             engine.report(r, n)
+                        } else {
+                            vec![]
+                        }
+                    }
+                    Event::Failed(epoch, r) => {
+                        if broker.as_ref().is_some_and(|b| b.0 == epoch) {
+                            engine.failed(r)
                         } else {
                             vec![]
                         }
