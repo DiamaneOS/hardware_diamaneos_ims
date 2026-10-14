@@ -26,6 +26,7 @@ use client::Client;
 use diamaneos_imeiprov::bdaddr::BdAddr;
 use diamaneos_imeiprov::imei::{check_pair, Imei};
 use diamaneos_imeiprov::message;
+use diamaneos_imeiprov::provision::{self, Modem};
 use diamaneos_imeiprov::wlanmac::WlanMac;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
@@ -139,45 +140,67 @@ fn run() -> i32 {
         }
     };
 
-    let mut txn: u16 = 1;
-    match read_modem_imei(&client, server, &mut txn) {
-        Ok(Some(m)) => info(&format!(
-            "modem: read_ok=true provisioned=true luhn_valid={} matches_slot1={} matches_slot2={}",
-            m.is_luhn_valid(),
-            m == slot1,
-            m == slot2
-        )),
-        Ok(None) => info("modem: read_ok=true provisioned=false"),
-        Err(e) => {
-            error(&format!("modem: read_ok=false reason={e}"));
-            return 1;
-        }
+    let mut modem = TclModem {
+        client: &client,
+        server,
+        txn: 1,
+    };
+    if mode == Mode::Write && pair.usable() {
+        let (before, written) = match provision::write_run(&mut modem, &slot1, &slot2) {
+            Ok(run) => run,
+            Err(e) => return read_failed(&e),
+        };
+        log_modem(before, &slot1, &slot2);
+        info(&format!(
+            "write: sub0_ok={} sub1_ok={} verify_slot1={}",
+            written.sub0_ok, written.sub1_ok, written.verify_slot1
+        ));
+        return if written.ok() { 0 } else { 1 };
     }
-
+    match modem.read() {
+        Ok(before) => log_modem(before, &slot1, &slot2),
+        Err(e) => return read_failed(&e),
+    }
     if mode == Mode::Check {
         return 0;
     }
+    error("write refused: traceability IMEIs did not validate");
+    1
+}
 
-    // --- write path ---
-    if !pair.usable() {
-        error("write refused: traceability IMEIs did not validate");
-        return 1;
+fn log_modem(value: Option<Imei>, slot1: &Imei, slot2: &Imei) {
+    match value {
+        Some(m) => info(&format!(
+            "modem: read_ok=true provisioned=true luhn_valid={} matches_slot1={} matches_slot2={}",
+            m.is_luhn_valid(),
+            m == *slot1,
+            m == *slot2
+        )),
+        None => info("modem: read_ok=true provisioned=false"),
     }
-    // Only write after a successful read. Write both subscriptions even when NV
-    // 550 already matches slot 1: the stock read message carries no subscription
-    // selector, so it cannot show slot 2, and a boot whose slot 2 write failed
-    // would otherwise never retry it. Stock tctd also writes both at every boot;
-    // the write is idempotent. Slot 2 is confirmed on the phone (*#06#).
-    let sub0_ok = write_slot(&client, server, &slot1, 0, &mut txn);
-    let sub1_ok = write_slot(&client, server, &slot2, 1, &mut txn);
-    let verify_ok = matches!(read_modem_imei(&client, server, &mut txn), Ok(Some(m)) if m == slot1);
-    info(&format!(
-        "write: sub0_ok={sub0_ok} sub1_ok={sub1_ok} verify_slot1={verify_ok}"
-    ));
-    if sub0_ok && sub1_ok && verify_ok {
-        0
-    } else {
-        1
+}
+
+fn read_failed(e: &ReadFail) -> i32 {
+    error(&format!("modem: read_ok=false reason={e}"));
+    1
+}
+
+/// NV 550 over the TCL QMI service.
+struct TclModem<'a> {
+    client: &'a Client,
+    server: client::Peer,
+    txn: u16,
+}
+
+impl Modem for TclModem<'_> {
+    type ReadError = ReadFail;
+
+    fn read(&mut self) -> Result<Option<Imei>, ReadFail> {
+        read_modem_imei(self.client, self.server, &mut self.txn)
+    }
+
+    fn write(&mut self, subscription: u8, imei: &Imei) -> bool {
+        write_slot(self.client, self.server, imei, subscription, &mut self.txn)
     }
 }
 

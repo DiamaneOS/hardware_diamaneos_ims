@@ -59,6 +59,11 @@ rust_test_host {
     test_options: { unit_test: true },
 }
 rust_test_host {
+    name: "DiamaneOSImeiProvWriteHostTests", srcs: ["imeiprov/tests/provision.rs"], edition: "2021",
+    rustlibs: ["libdiamaneos_imeiprov"],
+    test_options: { unit_test: true },
+}
+rust_test_host {
     name: "DiamaneOSImeiProvBdAddrHostTests", srcs: ["imeiprov/tests/bdaddr.rs"], edition: "2021",
     rustlibs: ["libdiamaneos_imeiprov"],
     test_options: { unit_test: true },
