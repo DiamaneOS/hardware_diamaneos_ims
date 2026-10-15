@@ -203,6 +203,9 @@ connectivity acknowledgements.
 
 - The observer's ten-second heartbeat refreshes a thirty-second lease. Real
   network changes and current-reporter death trigger immediate publication.
+- The lease and the protocol deadlines use CLOCK_MONOTONIC, which pauses in
+  deep sleep like the heartbeat's clock. Android's Rust `Instant` counts deep
+  sleep, and with it the lease expired on every sleep over thirty seconds.
 - Expiry withdraws the last positive network without guessing a switch change.
 - The reporter handles at most eight received datagrams per context per cycle,
   then polls each independent deadline machine. Its ordinary loop period is
