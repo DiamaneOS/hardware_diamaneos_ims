@@ -30,7 +30,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 const SERVICE: &str = "de.diamaneos.wlan.IReporter/default";
@@ -58,7 +58,7 @@ struct Shared {
 }
 struct Service {
     state: Arc<Mutex<Shared>>,
-    origin: Instant,
+    origin: u64,
 }
 impl Interface for Service {}
 fn denied() -> Status {
@@ -67,8 +67,18 @@ fn denied() -> Status {
 fn invalid() -> Status {
     Status::new_exception(ExceptionCode::ILLEGAL_ARGUMENT, None)
 }
-fn elapsed(origin: Instant) -> u64 {
-    origin.elapsed().as_millis().min(u64::MAX as u128) as u64
+/// Milliseconds since `origin` on CLOCK_MONOTONIC, which pauses in deep sleep like the
+/// observer's Handler heartbeat. Android's `Instant` counts deep sleep (CLOCK_BOOTTIME), so a
+/// lease measured with it expired whenever the phone slept for more than 30 seconds.
+fn monotonic_ms() -> u64 {
+    let mut now = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    // SAFETY: clock_gettime only writes the timespec it is given.
+    let rc = unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut now) };
+    assert_eq!(rc, 0, "CLOCK_MONOTONIC unavailable");
+    (now.tv_sec as u64).saturating_mul(1000).saturating_add(now.tv_nsec as u64 / 1_000_000)
+}
+fn elapsed(origin: u64) -> u64 {
+    monotonic_ms().saturating_sub(origin)
 }
 impl IReporter for Service {
     fn getStatus(&self, generation: i64) -> binder::Result<ReporterStatus> {
@@ -381,7 +391,7 @@ fn run() -> io::Result<()> {
     if !(1..=2).contains(&slots) {
         return Err(io::Error::other("unsupported slots"));
     }
-    let origin = Instant::now();
+    let origin = monotonic_ms();
     let shared = Arc::new(Mutex::new(Shared {
         observations: Observations::default(),
         uid: None,
