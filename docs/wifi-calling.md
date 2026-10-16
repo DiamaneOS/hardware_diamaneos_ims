@@ -19,9 +19,6 @@ PDN address.
 - The source observer and reporter give DSD acknowledged Wi-Fi state, current
   link addresses and bounded same-link DNS metadata. They negotiate no IKE and
   change no routing.
-- Tested with basic incoming and outgoing calls on two subscriptions in
-  Wi-Fi-only mode. Other carriers, roaming, suspend, reconnect and handover are
-  untested.
 
 ## Alternative: AOSP path
 

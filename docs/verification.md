@@ -60,8 +60,3 @@ contact no endpoints.
   real emergency traffic is part of the ordinary test plan.
 - AML is not part of DiamaneOS or this repository. eSIM management is a
   separate component.
-
-## Known limitation
-
-Restarting the Wi-Fi reporter can interrupt IMS registration for about 200
-seconds before it recovers.
