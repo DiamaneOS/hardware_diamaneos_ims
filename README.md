@@ -7,7 +7,6 @@ reporting for native Qualcomm IWLAN. Android's IMS service and the modem's IMS
 signalling, voice and carrier emergency location are not replaced. Native and
 carrier behavior: see [verification](docs/verification.md).
 
-  IWLAN as exposed by telephony. It has no Internet, location or SMS permission.
 ## Components
 
 - `dcm/`: memory-safe QMI DCM codec and bounded connection state machine
@@ -26,6 +25,11 @@ carrier behavior: see [verification](docs/verification.md).
 - `integration/`: emergency-APN comparison tooling and source IWLAN provenance.
 
 VoWiFi integration is described in [Wi-Fi calling](docs/wifi-calling.md).
+The device-selected [Wi-Fi reporter](docs/wlan-reporting-design.md) separates
+Android observations from modem access. It completes supported notification requests without inventing quality results.
+User and userdebug builds use the same protocol path. Final native and device
+qualification remain required before release. It is selected only by explicitly including `wlan-product.mk` and
+`wlan-board.mk` alongside the native Qualcomm IWLAN path.
 AML (Advanced Mobile Location) is not part of DiamaneOS. Its app, in
 [platform_packages_apps_EmergencyLocation](https://github.com/DiamaneOS/platform_packages_apps_EmergencyLocation),
 is not in the build and is not needed to build or test this repository.

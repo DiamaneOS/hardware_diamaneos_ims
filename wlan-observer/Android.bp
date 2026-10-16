@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package {
+    default_applicable_licenses: ["diamaneos_ims_license"],
+}
+
+android_app {
+    name: "DiamaneOSWlanObserver",
+    srcs: ["src/**/*.java"],
+    platform_apis: true,
+    static_libs: ["de.diamaneos.wlan-java", "DiamaneOSImsAddressPolicy"],
+    certificate: "platform",
+    system_ext_specific: true,
+    privileged: true,
+    required: ["sysconfig-de.diamaneos.wlanobserver.xml"],
+}
+prebuilt_etc {
+    name: "sysconfig-de.diamaneos.wlanobserver.xml",
+    src: "sysconfig.xml",
+    filename: "sysconfig-de.diamaneos.wlanobserver.xml",
+    sub_dir: "sysconfig", system_ext_specific: true,
+}
