@@ -3,7 +3,8 @@
 //! Small arm64 seccomp allowlist for the one-shot provisioning tool, installed
 //! after the partition read and before any QRTR work. SELinux independently
 //! controls the opened paths and the reachable sockets. `socket(2)` is limited
-//! to QRTR and the local AF_UNIX log socket. Everything unlisted returns ENOSYS.
+//! to QRTR and AF_UNIX (logd and the property service). Everything unlisted
+//! returns ENOSYS.
 
 use std::io;
 
@@ -18,7 +19,7 @@ pub fn install() -> io::Result<()> {
     const SYSCALL_OFFSET: u32 = 0;
     const ARG0_OFFSET: u32 = 16;
     const AF_QIPCRTR: u32 = 42;
-    const AF_UNIX: u32 = 1; // liblog connects a local datagram socket to logd.
+    const AF_UNIX: u32 = 1; // liblog's socket to logd, the status property set.
     const NR_NEWFSTATAT: u32 = 79;
     const NR_FSTAT: u32 = 80;
     const KILL: u32 = 0x8000_0000;
@@ -48,7 +49,7 @@ pub fn install() -> io::Result<()> {
         allow(KILL),
         ld(SYSCALL_OFFSET),
     ];
-    // socket(2): permit only AF_QIPCRTR and the AF_UNIX log socket.
+    // socket(2): permit only AF_QIPCRTR and AF_UNIX.
     f.extend([
         jeq(libc::SYS_socket as u32, 0, 5),
         ld(ARG0_OFFSET),

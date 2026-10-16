@@ -8,11 +8,13 @@
 //! reading back. With `--bt-address` it instead reads the factory Bluetooth
 //! address from the same partition, validates it and sets it in one property
 //! (`ro.vendor.diamaneos.bt.factory_address`), which only this domain may set.
-//! The IMEI modes set no property. With `--wlan-mac` it reads the factory Wi-Fi
-//! MAC, validates it and writes the WLAN driver's MAC file to a RAM-backed path
-//! only this domain may write ([`WLAN_MAC_FILE`]). It opens no non-QRTR sockets
-//! (besides the log and property sockets), writes no region data and no
-//! persistent file, and logs only booleans and counters -- never an identifier.
+//! `--write` publishes its outcome in [`STATUS_PROPERTY`], so the setup wizard
+//! can offer a restart after a first write. With `--wlan-mac` it reads the
+//! factory Wi-Fi MAC, validates it and writes the WLAN driver's MAC file to a
+//! RAM-backed path only this domain may write ([`WLAN_MAC_FILE`]). It opens no
+//! non-QRTR sockets (besides the log and property sockets), writes no region
+//! data and no persistent file, and logs only booleans and counters -- never an
+//! identifier.
 //!
 //! Protocol and partition facts are documented in `src/message.rs`, `src/imei.rs`,
 //! `src/bdaddr.rs`, `src/wlanmac.rs` and `src/trace.rs` (reverse-engineered from
@@ -26,7 +28,7 @@ use client::Client;
 use diamaneos_imeiprov::bdaddr::BdAddr;
 use diamaneos_imeiprov::imei::{check_pair, Imei};
 use diamaneos_imeiprov::message;
-use diamaneos_imeiprov::provision::{self, Modem};
+use diamaneos_imeiprov::provision::{self, Modem, Status};
 use diamaneos_imeiprov::wlanmac::WlanMac;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
@@ -44,6 +46,10 @@ const EXPECTED_UID: u32 = 2994;
 /// The device's Bluetooth init rc copies it to the property its HCI
 /// implementation reads.
 const BT_ADDRESS_PROPERTY: &str = "ro.vendor.diamaneos.bt.factory_address";
+
+/// `--write` outcome ([`Status`]). Only this domain sets it and the setup
+/// wizard reads it.
+const STATUS_PROPERTY: &str = "vendor.diamaneos.imei.status";
 
 /// Written once per boot by `--wlan-mac`. The tree is in RAM (tmpfs), created
 /// by init before this runs (`imeiprovd.rc`). The device's ueventd.rc lists
@@ -96,6 +102,7 @@ fn run() -> i32 {
     let Some(modem_node) = modem_node else {
         return 2;
     };
+    let report = (mode == Mode::Write).then(StatusReport::start);
 
     // Read and validate the traceability IMEIs (read-only).
     let (slot1, slot2) = match trace::read_imeis(trace::PATH) {
@@ -155,6 +162,9 @@ fn run() -> i32 {
             "write: sub0_ok={} sub1_ok={} verify_slot1={}",
             written.sub0_ok, written.sub1_ok, written.verify_slot1
         ));
+        if let Some(report) = report {
+            report.finish(Status::of(before, &slot1, &written));
+        }
         return if written.ok() { 0 } else { 1 };
     }
     match modem.read() {
@@ -166,6 +176,40 @@ fn run() -> i32 {
     }
     error("write refused: traceability IMEIs did not validate");
     1
+}
+
+/// Sets [`STATUS_PROPERTY`] to `running`, then to the result, or to `failed`
+/// when the run ends without one.
+struct StatusReport {
+    reported: bool,
+}
+
+impl StatusReport {
+    fn start() -> Self {
+        report_status(Status::Running);
+        Self { reported: false }
+    }
+
+    fn finish(mut self, status: Status) {
+        report_status(status);
+        self.reported = true;
+    }
+}
+
+impl Drop for StatusReport {
+    fn drop(&mut self) {
+        if !self.reported {
+            report_status(Status::Failed);
+        }
+    }
+}
+
+fn report_status(status: Status) {
+    if set_property(STATUS_PROPERTY, status.as_str()) {
+        info(&format!("status: {}", status.as_str()));
+    } else {
+        error("status: property not set");
+    }
 }
 
 fn log_modem(value: Option<Imei>, slot1: &Imei, slot2: &Imei) {

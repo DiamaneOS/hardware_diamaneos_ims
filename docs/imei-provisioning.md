@@ -5,8 +5,8 @@ IMEIs. DiamaneOS does not ship Fairphone's closed traceability daemon, so the
 modem would otherwise report Qualcomm's placeholder IMEI on both slots.
 `imeiprovd` does only three of that daemon's jobs: the modem-NV part and, in
 separate modes, the factory Bluetooth address and Wi-Fi MAC (see below). It
-writes nothing to persist, leaves the region code alone, and its IMEI modes set
-no properties.
+writes nothing to persist and leaves the region code alone. `--write` sets one
+status property (below).
 
 ## What it does
 
@@ -37,6 +37,7 @@ other identifier.
     check and differ.
   - A failed write or read-back is logged and the tool exits non-zero. It does
     not retry until the next boot.
+  - Sets `vendor.diamaneos.imei.status` ([below](#status-and-slot-order)).
 - `--bt-address`: the factory Bluetooth address, run once per boot by
   `imeiprovd.rc` as its own service (below). Touches no IMEI and no modem.
 - `--wlan-mac`: the factory Wi-Fi MAC, run once per boot by `imeiprovd.rc` as
@@ -47,6 +48,24 @@ and every OTA) makes the bootloader restore the modem file system from its
 golden copy (fsg), which holds no IMEI, so NV 550 is unprovisioned again. A
 plain reboot or a bootloader round trip keeps it.
 Stock `tctd` writes the IMEIs at every boot for the same reason.
+
+## Status and slot order
+
+When the modem starts without the IMEIs and takes them at runtime, it pairs
+them with the SIM slots the other way round from the box. A modem restart keeps
+that pairing. A phone restart, which starts the modem with the IMEIs already in
+NV, gives the box order.
+
+`--write` sets `vendor.diamaneos.imei.status` to `running` when it starts, then:
+
+- `written`: the modem started without the IMEIs and took both. The slot order
+  is swapped until the phone restarts.
+- `unchanged`: the modem already had them.
+- `failed`: anything else, including a run that ended early.
+
+The setup wizard's last step reads it and offers a restart after `written`.
+Nothing else restarts the phone for it. If an update leaves the modem without
+the IMEIs, the order stays swapped until the next restart.
 
 ## Bluetooth address (`--bt-address`)
 
@@ -113,8 +132,13 @@ address.
   access to the traceability block device (`vendor_traceability_block_device`),
   the SELinux enforce flag it checks before running, setting
   `ro.vendor.diamaneos.bt.factory_address` (its own vendor-internal type,
-  `vendor_diamaneos_bt_address_prop`), and creating and writing the Wi-Fi MAC
-  file (`vendor_diamaneos_wlan_mac_file`, which also labels its directories).
+  `vendor_diamaneos_bt_address_prop`) and `vendor.diamaneos.imei.status`
+  (vendor restricted, `vendor_diamaneos_imei_status_prop`), and creating and
+  writing the Wi-Fi MAC file (`vendor_diamaneos_wlan_mac_file`, which also
+  labels its directories).
+- Only imeiprovd, init and vendor_init may set the status. Besides imeiprovd,
+  only the setup wizard's domain (`platform_app`), init, vendor_init and
+  dumpstate may read it.
 - `neverallow` rules forbid capabilities, any non-QRTR socket, writing any
   block device, setting any other property, adding names to any other
   directory, reading the MAC file back, and Binder.
@@ -124,9 +148,9 @@ address.
   device policy) every domain except ueventd, init and vendor_init from
   reading the MAC file.
 - An arm64 seccomp allowlist is installed before any modem communication, and
-  `socket(2)` is limited to QRTR and the local log socket. `--bt-address` and
-  `--wlan-mac` install none: each reads 6 bytes, makes one property call or
-  writes one file, and exits.
+  `socket(2)` is limited to QRTR and local sockets (logd and the property
+  service). `--bt-address` and `--wlan-mac` install none: each reads 6 bytes,
+  makes one property call or writes one file, and exits.
 - Refuses to run unless SELinux is enforcing.
 
 ## Protocol
@@ -157,7 +181,8 @@ from the RFC 7042 documentation range.
   (round trip and exact bytes), pair validation and the NV message build/parse
   paths.
 - `imeiprov/tests/provision.rs`: the `--write` run with a fake modem, including
-  a failed slot 2 write that the next boot writes again, and failed reads.
+  a failed slot 2 write that the next boot writes again, failed reads and the
+  reported status.
 - `imeiprov/tests/bdaddr.rs`: the Bluetooth address byte order, property
   format, validation and redaction.
 - `imeiprov/tests/wlanmac.rs`: the Wi-Fi MAC's byte order, the exact MAC file
@@ -172,6 +197,7 @@ from the RFC 7042 documentation range.
    - `modem: read_ok=true provisioned=...`: the modem's value before the
      write. It is `provisioned=false` after a slot switch or an OTA.
    - `write: sub0_ok=true sub1_ok=true verify_slot1=true`
+   - `status: written` (or `unchanged` on later boots)
 3. `*#06#` shows the real IMEIs on both slots.
 
 A failed read logs `read_ok=false reason=...` with the error kind or NV status

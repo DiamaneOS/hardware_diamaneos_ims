@@ -5,16 +5,17 @@
 # groups, no capabilities): the one-shot IMEI provisioning tool.
 # It reads the two IMEIs from the read-only traceability partition and, in
 # --write mode, provisions modem NV 550 over the Fairphone TCL QMI service
-# (QRTR service 0x2ff). In --bt-address mode it reads the factory
-# Bluetooth address from the same partition and sets one property. In
-# --wlan-mac mode it reads the factory Wi-Fi MAC and writes the WLAN driver's
-# MAC file into a RAM-backed tree. It replaces the modem-NV and address parts
+# (QRTR service 0x2ff) and reports the outcome in one property. In
+# --bt-address mode it reads the factory Bluetooth address from the same
+# partition and sets one property. In --wlan-mac mode it reads the factory
+# Wi-Fi MAC and writes the WLAN driver's MAC file into a RAM-backed tree. It replaces the modem-NV and address parts
 # of stock `tctd` (and stock's setwlanmac.sh). It writes no region data, no
 # persistent file, and opens no non-QRTR socket besides the property socket.
 #
 # It gets exactly: a QRTR socket, read-only access to the traceability block
-# device, the SELinux enforce flag it checks before running, setting its one
-# Bluetooth address property and creating the Wi-Fi MAC file. Nothing else.
+# device, the SELinux enforce flag it checks before running, setting its
+# Bluetooth address and IMEI status properties and creating the Wi-Fi MAC file.
+# Nothing else.
 type diamaneos_imeiprov, domain;
 type diamaneos_imeiprov_exec, exec_type, vendor_file_type, file_type;
 init_daemon_domain(diamaneos_imeiprov)
@@ -33,8 +34,10 @@ allow diamaneos_imeiprov vendor_traceability_block_device:blk_file { open read g
 allow diamaneos_imeiprov selinuxfs:file r_file_perms;
 
 # --bt-address: set ro.vendor.diamaneos.bt.factory_address (property_contexts,
-# exact name), through the property socket. No other property.
+# exact name), through the property socket.
 set_prop(diamaneos_imeiprov, vendor_diamaneos_bt_address_prop)
+# --write: set vendor.diamaneos.imei.status (exact name, enum values).
+set_prop(diamaneos_imeiprov, vendor_diamaneos_imei_status_prop)
 
 # --wlan-mac: create /mnt/vendor/wlan_mac/wlan/qca_cld/qca6750/wlan_mac.bin
 # (file.te, file_contexts) new, write it once and close it. It walks /mnt
@@ -57,7 +60,19 @@ neverallow diamaneos_imeiprov dev_type:blk_file { write append };
 neverallow diamaneos_imeiprov {
   property_type
   -vendor_diamaneos_bt_address_prop
+  -vendor_diamaneos_imei_status_prop
 }:property_service set;
+# Only imeiprovd reports the IMEI status. Only the setup wizard's domain reads
+# it, besides imeiprovd and the domains that read every property.
+neverallow { domain -init -vendor_init -diamaneos_imeiprov } vendor_diamaneos_imei_status_prop:property_service set;
+neverallow {
+  domain
+  -init
+  -vendor_init
+  -dumpstate
+  -platform_app
+  -diamaneos_imeiprov
+} vendor_diamaneos_imei_status_prop:file { open read map };
 # Only imeiprovd sets the factory Bluetooth address (init may set any property,
 # and the platform lets vendor_init set every vendor property).
 neverallow { domain -init -vendor_init -diamaneos_imeiprov } vendor_diamaneos_bt_address_prop:property_service set;
