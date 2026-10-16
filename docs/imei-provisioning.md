@@ -25,23 +25,21 @@ other identifier.
 
 ## Modes
 
-- `--check`: decode, validate and compare; never writes. For dry runs
-  (`adb shell 'su 0 /vendor/bin/imeiprovd --check $(getprop ro.vendor.diamaneos.ims.modem_node)'`
-  on a userdebug build). `--check` and `--write` take the modem's QRTR node and
-  use the TCL QMI service only if it is on that node, as announced by the local
-  QRTR name service.
-- `--write`: the shipped configuration; `imeiprovd.rc` runs it once per boot.
+- `--check`: decode, validate and compare, never write. `--check` and
+  `--write` take the modem's QRTR node and use the TCL QMI service only if it
+  is on that node, as announced by the local QRTR name service.
+- `--write`: the shipped configuration, run once per boot by `imeiprovd.rc`.
   As `--check`, then, only after a successful read, provisions both
   subscriptions and reads back. It writes even when slot 1 already matches:
   the read cannot show slot 2, so a boot whose slot 2 write failed would
   otherwise never write it again.
   - Refuses to write unless both traceability IMEIs are 15 digits, pass the Luhn
     check and differ.
-  - A failed write or read-back is logged and the tool exits non-zero; no retry
-    until the next boot.
-- `--bt-address`: the factory Bluetooth address; `imeiprovd.rc` runs it once
-  per boot as its own service (below). Touches no IMEI and no modem.
-- `--wlan-mac`: the factory Wi-Fi MAC; `imeiprovd.rc` runs it once per boot as
+  - A failed write or read-back is logged and the tool exits non-zero. It does
+    not retry until the next boot.
+- `--bt-address`: the factory Bluetooth address, run once per boot by
+  `imeiprovd.rc` as its own service (below). Touches no IMEI and no modem.
+- `--wlan-mac`: the factory Wi-Fi MAC, run once per boot by `imeiprovd.rc` as
   its own service (below). Touches no IMEI and no modem.
 
 Why `--write` runs at every boot: activating a slot (`fastboot --set-active`,
@@ -52,22 +50,22 @@ Stock `tctd` writes the IMEIs at every boot for the same reason.
 
 ## Bluetooth address (`--bt-address`)
 
-Without the closed daemon, Qualcomm's HCI implementation found no address and
-generated one: the prefix 22:22 plus four bytes from `rand()`, stored in
+Without the closed daemon, Qualcomm's HCI implementation finds no address and
+generates one: the prefix 22:22 plus four bytes from `rand()`, stored in
 `persist.vendor.service.bdroid.bdaddr`, which marks a DiamaneOS phone. The
 factory address is in the traceability partition, so `vendor.imeiprovd-bt`
 (started at `post-fs`):
 
 1. Reads the 6 bytes at offset `0x33` (right after the slot 1 IMEI), read-only.
-   They are stored least significant byte first; stock prints them in reverse
+   They are stored least significant byte first. Stock prints them in reverse
    as `xx:xx:xx:xx:xx:xx` (`tctd` @0xb3cc).
-2. Validates them. Stock checks nothing; `imeiprovd` rejects all-zero and
+2. Validates them. Stock checks nothing, but `imeiprovd` rejects all-zero and
    all-`0xff` values, group (multicast) and locally administered addresses
    (which includes the generated 22:22 prefix), and the Bluetooth inquiry
    LAPs `0x9E8B00`-`0x9E8B3F`, which no device address may use.
 3. Sets `ro.vendor.diamaneos.bt.factory_address` (lowercase, colon-separated,
    as stock). The device's Bluetooth init rc copies it to
-   `ro.vendor.bt.boot.macaddr`, as stock's `tctd.rc` does; the HCI
+   `ro.vendor.bt.boot.macaddr`, as stock's `tctd.rc` does. The HCI
    implementation reads that before falling back to its stored or a newly
    generated address.
 
@@ -78,8 +76,8 @@ address it used before.
 
 ## Wi-Fi MAC (`--wlan-mac`)
 
-Without the closed daemon, nothing wrote the WLAN driver's MAC file, so the
-QCA6750 driver used its firmware's generic Qualcomm address (prefix 00:03:7f)
+Without the closed daemon, nothing writes the WLAN driver's MAC file, so the
+QCA6750 driver uses its firmware's generic Qualcomm address (prefix 00:03:7f)
 instead of the factory MAC. Stock: `tctd` sets `ro.vendor.trace.wifimac` and
 `setwlanmac.sh`, a late_start script, copies it to
 `/mnt/vendor/persist/qca6750/wlan_mac.bin`, which a `/vendor/firmware` link
@@ -105,12 +103,12 @@ the address per network on top of it.
 It logs `wlan mac: written`, `wlan mac: missing` (read failed), `wlan mac:
 invalid` or `wlan mac: file not written: <error kind>`, never the MAC. If the
 MAC is missing or invalid no file is written and the driver uses its firmware's
-address, as before.
+address.
 
 ## Privileges
 
-- Own vendor user/group `vendor_imeiprov` (UID/GID 2994, `config.fs`); no
-  supplementary groups, no capabilities.
+- Own vendor user/group `vendor_imeiprov` (UID/GID 2994, `config.fs`), with no
+  supplementary groups and no capabilities.
 - SELinux domain `diamaneos_imeiprov`, allowed only a QRTR socket, read-only
   access to the traceability block device (`vendor_traceability_block_device`),
   the SELinux enforce flag it checks before running, setting
@@ -125,7 +123,7 @@ address, as before.
   vendor_init (the copy) and dumpstate from reading the property, and (in the
   device policy) every domain except ueventd, init and vendor_init from
   reading the MAC file.
-- An arm64 seccomp allowlist is installed before any modem communication;
+- An arm64 seccomp allowlist is installed before any modem communication, and
   `socket(2)` is limited to QRTR and the local log socket. `--bt-address` and
   `--wlan-mac` install none: each reads 6 bytes, makes one property call or
   writes one file, and exits.
@@ -137,7 +135,7 @@ address, as before.
   service). QMI-over-QRTR framing (no QMUX header), reusing the codec in
   `diamaneos_ims_dcm::protocol`.
 - Message layouts come from the stock binary's QMI IDL message table. The
-  service has no standard QMI result TLV; success is NV status 0.
+  service has no standard QMI result TLV. Success is NV status 0.
   - NV read (`0x10`): request TLV `0x01` u32 item id (550). Reply TLV `0x01`
     u32 data length, TLV `0x02` u8 NV status, TLV `0x03` u8[4096] data. Status
     5 (NV_NOTACTIVE) means the item was never written.
@@ -145,7 +143,7 @@ address, as before.
     length (10), TLV `0x03` u8[512] data: the 9-byte NV 550 value, then the
     subscription index (0 or 1). Reply TLV `0x02` u8 NV status.
 - Replies use the service's full maximum message size (4110 bytes of TLVs), so
-  the receive buffer is 8 KiB; a larger datagram is reported, not truncated.
+  the receive buffer is 8 KiB. A larger datagram is reported, not truncated.
 - NV 550 value: 9 bytes, `[0x08][(d1<<4)|0x0A][(d3<<4)|d2]...[(d15<<4)|d14]`
   (the standard Qualcomm NV_UE_IMEI BCD layout).
 
@@ -167,30 +165,19 @@ from the RFC 7042 documentation range.
 
 ## Checking on a phone
 
-1. Boot the phone; the service runs once after persistent properties are ready.
-2. Read the result: `adb logcat -d -s imeiprovd`. Or run a dry run as root on a
-   userdebug build: `adb shell 'su 0 /vendor/bin/imeiprovd --check $(getprop ro.vendor.diamaneos.ims.modem_node)'`.
-3. Before provisioning, `--check` shows:
-   - `trace: slot1_valid=true slot2_valid=true distinct=true`
-   - `modem: read_ok=true provisioned=false`
-
-   So the traceability decode and the modem NV read work, and NV 550 was never
-   written (the modem reports Qualcomm's placeholder IMEI).
-4. After a `--write` run and a reboot, `--check` shows
-   `modem: read_ok=true provisioned=true luhn_valid=true matches_slot1=true`,
-   and `*#06#` shows the real IMEIs on both slots.
+1. Boot the phone. The service runs once after persistent properties are ready.
+2. `adb logcat -d -s imeiprovd` shows the run:
+   - `trace: slot1_valid=true slot2_valid=true distinct=true`: the
+     traceability decode works.
+   - `modem: read_ok=true provisioned=...`: the modem's value before the
+     write. It is `provisioned=false` after a slot switch or an OTA.
+   - `write: sub0_ok=true sub1_ok=true verify_slot1=true`
+3. `*#06#` shows the real IMEIs on both slots.
 
 A failed read logs `read_ok=false reason=...` with the error kind or NV status
 only.
 
-For the Bluetooth address: `adb logcat -d -s imeiprovd` shows `bt address: set`.
-As root, compare only the first 8 characters (the manufacturer prefix) of
-`getprop ro.vendor.bt.boot.macaddr` with those of the factory file stock left
-in `/mnt/vendor/persist/trace_info/bt_macaddr`; they match, and neither starts
-with `22:22`.
-
-For the Wi-Fi MAC: `adb logcat -d -s imeiprovd` shows `wlan mac: written`, and
-the kernel log shows ueventd's `found /mnt/vendor/wlan_mac/wlan/qca_cld/qca6750/wlan_mac.bin`
-and the driver's `using MAC address from wlan_mac.bin`. As root, compare only
-the first 6 hex digits after `Intf0MacAddress=` of that file with those of
-stock's `/mnt/vendor/persist/qca6750/wlan_mac.bin`.
+For the Bluetooth address, the log shows `bt address: set`. For the Wi-Fi MAC,
+it shows `wlan mac: written`, and the kernel log in a bug report shows
+ueventd's `found /mnt/vendor/wlan_mac/wlan/qca_cld/qca6750/wlan_mac.bin` and
+the driver's `using MAC address from wlan_mac.bin`.
