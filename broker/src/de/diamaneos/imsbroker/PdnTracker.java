@@ -27,7 +27,7 @@ import java.util.List;
 
 /**
  * One network request the broker holds for a (slot, type), and what it knows about the network that
- * satisfies it. Used only on the broker's looper thread; ConnectivityManager delivers the callbacks
+ * satisfies it. Used only on the broker's looper thread. ConnectivityManager delivers the callbacks
  * there.
  */
 final class PdnTracker extends ConnectivityManager.NetworkCallback {

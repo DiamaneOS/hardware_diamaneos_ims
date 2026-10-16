@@ -17,7 +17,7 @@ service vendor.imsdcmd /vendor/bin/imsdcmd
     group vendor_imsdcm
     capabilities
     disabled
-    # Keep Android init's ordinary restart floor; no one-second crash loop.
+    # Keep Android init's ordinary restart floor. No one-second crash loop.
 
 # Startup and kill-switch actions live in imsdcmd-control.rc on system_ext.
 # The persistent-properties-ready gate is platform-private and cannot be a

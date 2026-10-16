@@ -33,7 +33,7 @@ pub struct Client {
 impl Client {
     /// Bind an ephemeral QRTR port on the local node.
     pub fn bind() -> io::Result<Self> {
-        // SAFETY: socket(2) returns an owned fd; the address is the 12-byte
+        // SAFETY: socket(2) returns an owned fd. The address is the 12-byte
         // sockaddr_qrtr whose length the kernel validates.
         let raw = unsafe {
             libc::socket(
@@ -52,7 +52,7 @@ impl Client {
             node: 0,
             port: 0,
         };
-        // The kernel knows this socket's node; read it before binding port 0.
+        // The kernel knows this socket's node. Read it before binding port 0.
         let mut len = mem::size_of::<Address>() as libc::socklen_t;
         if unsafe { libc::getsockname(raw, (&mut a as *mut Address).cast(), &mut len) } < 0 {
             return Err(io::Error::last_os_error());
@@ -95,7 +95,7 @@ impl Client {
             port: to.port,
         };
         // SAFETY: a borrowed buffer and a fixed-size address passed to one
-        // synchronous sendto; no pointer escapes.
+        // synchronous sendto. No pointer escapes.
         let rc = unsafe {
             libc::sendto(
                 self.fd.as_raw_fd(),
@@ -143,7 +143,7 @@ impl Client {
         };
         let mut from_len = mem::size_of::<Address>() as libc::socklen_t;
         // SAFETY: recvfrom writes at most RECV_BUF bytes into the owned buffer
-        // and the address into the sized struct; lengths are checked after.
+        // and the address into the sized struct. Lengths are checked after.
         // MSG_TRUNC makes it return the datagram's real length, so a reply
         // larger than the buffer is reported instead of silently cut.
         let n = unsafe {
@@ -262,7 +262,7 @@ impl Client {
                 if from.node == server.node && from.port == server.port {
                     return Ok(Some(data));
                 }
-                // Ignore control notices and stray datagrams; keep waiting.
+                // Ignore control notices and stray datagrams. Keep waiting.
             }
         }
         Ok(None)

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package de.diamaneos.wlan;
-/** Minimal protocol progress/errors; no network, subscriber or measurement data. */
+/** Minimal protocol progress/errors. No network, subscriber or measurement data. */
 parcelable ReporterStatus {
     int primaryStage = -1;
     int primaryOperation;

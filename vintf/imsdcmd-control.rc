@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-# Platform lifecycle gate. Ordinary/user builds always start the selected service;
-# debug-only nonpersistent kill controls cannot disable a later boot or release.
+# Platform lifecycle gate. User builds always start the selected service. The
+# kill controls work only on debuggable builds and reset at every boot.
 on property:ro.persistent_properties.ready=true
     start vendor.imsdcmd
 

@@ -4,7 +4,7 @@
 //!
 //! Both are IEEE 802 48-bit addresses (EUI-48) that the `traceability`
 //! partition stores least significant byte first. These checks reject only
-//! values that cannot be a factory-assigned address; stock checks nothing.
+//! values that cannot be a factory-assigned address. Stock checks nothing.
 
 /// Bytes of an EUI-48.
 pub const LEN: usize = 6;

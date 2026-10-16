@@ -48,7 +48,7 @@ pub fn install() -> io::Result<()> {
             k: SECCOMP_SYSCALL_OFFSET,
         },
     ];
-    // socket(2) is permitted for QRTR only; Binder is a file descriptor.
+    // socket(2) is permitted for QRTR only. Binder is a file descriptor.
     f.extend([
         F {
             code: JEQ,
@@ -195,7 +195,7 @@ pub fn install() -> io::Result<()> {
         len: f.len() as u16,
         filter: f.as_mut_ptr(),
     };
-    // SAFETY: kernel copies this bounded BPF program synchronously; all pointers
+    // SAFETY: kernel copies this bounded BPF program synchronously. All pointers
     // remain live until prctl returns. Thread creation happens only afterward.
     if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
         return Err(io::Error::last_os_error());

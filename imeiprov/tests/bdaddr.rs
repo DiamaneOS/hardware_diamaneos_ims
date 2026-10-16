@@ -25,7 +25,7 @@ fn offset_follows_slot1_imei() {
 #[test]
 fn stored_order_is_least_significant_first() {
     // The first stored byte (0x01) would be a group address if read in stored
-    // order; reversed it is the last byte of a valid unicast address.
+    // order. Reversed it is the last byte of a valid unicast address.
     let address = BdAddr::from_trace(&DOC_STORED).unwrap();
     assert_eq!(address.property_value(), "00:00:5e:00:53:01");
 }

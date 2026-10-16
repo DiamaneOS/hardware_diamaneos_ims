@@ -5,7 +5,7 @@
 //! The partition stores each IMEI as 15 ASCII digits. Stock `tctd` (`start`
 //! @0xbb18-0xbb58) reads slot 1 at offset 0x24 and slot 2 at offset 0x263, each
 //! 15 bytes. The Bluetooth address follows slot 1: 6 bytes at 0x33 (stock
-//! @0xb434; see `bdaddr`), then the Wi-Fi MAC: 6 bytes at 0x39 (see
+//! @0xb434, see `bdaddr`), then the Wi-Fi MAC: 6 bytes at 0x39 (see
 //! `wlanmac`). This module opens the block device O_RDONLY and reads only
 //! those windows, one mode at a time: the IMEIs in `--write`/`--check` mode,
 //! the Bluetooth address in `--bt-address` mode and the Wi-Fi MAC in
@@ -66,7 +66,7 @@ fn read_eui48(path: &str, offset: u64) -> io::Result<[u8; eui48::LEN]> {
 }
 
 fn open(path: &str) -> io::Result<File> {
-    // read(true) opens O_RDONLY; O_CLOEXEC avoids leaking the fd. No write mode.
+    // read(true) opens O_RDONLY. O_CLOEXEC avoids leaking the fd. No write mode.
     File::options()
         .read(true)
         .custom_flags(libc::O_CLOEXEC)

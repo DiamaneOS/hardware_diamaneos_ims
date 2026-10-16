@@ -68,7 +68,7 @@ pub enum Effect {
     Send(Peer, Packet),
     BringUp(Request),
     Release(Request),
-    /// The peer's accepted deactivate reply precedes broker teardown; the
+    /// The peer's accepted deactivate reply precedes broker teardown. The
     /// adapter queues this barrier between that reply and the terminal result.
     ReleaseAfter {
         peer: Peer,
@@ -105,8 +105,8 @@ pub struct Diagnostics {
     // Requests kept filed after a network loss with no context yet.
     pub held_groups: usize,
     pub sessions_by_slot: [usize; 4], // unspecified, then slots 0..2
-    // Same slot indexing; counts only, never session or peer identifiers.
-    // Requests include duplicates and admission failures; releases count
+    // Same slot indexing. Counts only, never session or peer identifiers.
+    // Requests include duplicates and admission failures. Releases count
     // removed sessions, not successful bearer activations or shared releases.
     pub activation_requests_by_slot: [u64; 4],
     // Explicit PDN deactivation (0x21) and instance destruction (0x33).
@@ -129,16 +129,16 @@ pub struct Diagnostics {
     pub modem_losses: u64,
     pub publisher_conflicts: u64,
     pub publication_active: bool,
-    // QRTR buffer or memory exhaustion; the affected work is retried, not failed.
+    // QRTR buffer or memory exhaustion. The affected work is retried, not failed.
     pub transport_exhaustion: u64,
     // Oneway calls a live broker did not receive (not broker deaths).
     pub broker_call_failures: u64,
-    // Failed attempts to replace the reserved-port socket; each is retried.
+    // Failed attempts to replace the reserved-port socket. Each is retried.
     pub socket_rebind_failures: u64,
-    // Records of this service on other nodes; they are not local conflicts.
+    // Records of this service on other nodes. They are not local conflicts.
     pub remote_publisher_records: u64,
 }
-/// Device configuration fixes the modem node and number of slots; no first-packet trust.
+/// Device configuration fixes the modem node and number of slots. No first-packet trust.
 pub struct Engine {
     modem_node: u32,
     slots: u32,
@@ -664,7 +664,7 @@ impl Engine {
             // These handlers are enabled only with their validated, bounded fields.
             0x23 => vec![self.reply(peer, p::response(frame.txn, frame.id, 0, 0), None)],
             0x33 => {
-                // Width/mandatory validation above; scope destruction to this client.
+                // Width/mandatory validation above. Scope destruction to this client.
                 let instance = p::u32_value(frame.required(1).unwrap()).unwrap();
                 let counts = &mut self.diagnostics.modem_instance_destructions_by_slot;
                 self.sessions.retain(|s| {
@@ -859,7 +859,7 @@ impl Engine {
                         other => other,
                     }),
             );
-            // The deactivate response acknowledges the request; the modem also
+            // The deactivate response acknowledges the request. The modem also
             // expects a terminal PDP indication for the original context. Stock
             // emits this after its data-service teardown, before a replacement
             // activation. Revoke ownership and release an unused broker request

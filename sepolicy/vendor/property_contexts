@@ -3,11 +3,12 @@
 #
 # ro.vendor.diamaneos.ims.emergency_pdn: the build's emergency policy, set in
 #   PRODUCT_VENDOR_PROPERTIES. "serve" answers the modem's emergency PDN
-#   requests like stock; "refuse" (and an absent or unknown value) refuses
-#   them. Production candidates select "serve"; emergency data is not silently disabled.
+#   requests like stock. "refuse" (and an absent or unknown value) refuses
+#   them. ims-product.mk selects "serve", so emergency data is not silently
+#   disabled.
 # vendor.diamaneos.ims.emergency_pdn_kill: kill switch. 1 makes the
-#   daemon refuse emergency PDN requests whatever the build policy says; it
-#   debug-only, nonpersistent; cannot disable a release or later boot.
+#   daemon refuse emergency PDN requests whatever the build policy says. It
+#   works only on debuggable builds and resets at every boot.
 # vendor.diamaneos.ims.dcm_kill: kill switch. 1 stops the daemon
 #   (imsdcmd.rc), so no DCM service is published to the modem at all.
 ro.vendor.diamaneos.ims.emergency_pdn             u:object_r:vendor_diamaneos_imsdcm_prop:s0 exact enum refuse serve

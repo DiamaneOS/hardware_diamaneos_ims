@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The DiamaneOS Project
-//! Small FFI boundary. Owns one datagram fd; never opens Internet sockets.
+//! Small FFI boundary. Owns one datagram fd. Never opens Internet sockets.
 use diamaneos_ims_dcm::{engine::Peer, protocol::MAX_DATAGRAM, qrtr::*};
 use std::{
     collections::VecDeque,
@@ -27,7 +27,7 @@ pub struct Qrtr {
     fd: OwnedFd,
     local: Peer,
     published: bool,
-    // Read while publishing; receive() returns these before reading again.
+    // Read while publishing. receive() returns these before reading again.
     deferred: VecDeque<(Peer, Vec<u8>)>,
 }
 impl Qrtr {
@@ -37,7 +37,7 @@ impl Qrtr {
 
     pub fn bind_imsdcm() -> io::Result<Self> {
         // Downstream role allocation paired with CONFIG_QRTR_IMSDCM_OWNERSHIP.
-        // Discovery still advertises the port; no modem firmware ABI is changed.
+        // Discovery still advertises the port. No modem firmware ABI is changed.
         const IMSDCM_PORT: u32 = 0x7fff;
         Self::bind_port(IMSDCM_PORT)
     }
@@ -50,7 +50,7 @@ impl Qrtr {
 
     fn bind_port(port: u32) -> io::Result<Self> {
         // SAFETY: socket returns an owned fd on success. Address is the Linux UAPI
-        // sockaddr_qrtr (12 bytes); both sizes are checked by the kernel.
+        // sockaddr_qrtr (12 bytes). Both sizes are checked by the kernel.
         let raw = unsafe {
             libc::socket(
                 AF_QIPCRTR,
@@ -70,7 +70,7 @@ impl Qrtr {
         };
         // A new QRTR socket already knows its local node. qrtr_bind rejects
         // any other node, including zero when the kernel's local node is one.
-        // Ask the kernel before requesting an ephemeral port; never infer the
+        // Ask the kernel before requesting an ephemeral port. Never infer the
         // AP node from the modem node or a device-specific constant.
         let mut len = mem::size_of::<Address>() as libc::socklen_t;
         let rc = unsafe { libc::getsockname(raw, (&mut a as *mut Address).cast(), &mut len) };
@@ -176,7 +176,7 @@ impl Qrtr {
         if p.revents & libc::POLLERR != 0 {
             let mut error: libc::c_int = 0;
             let mut size = mem::size_of_val(&error) as libc::socklen_t;
-            // SAFETY: fixed integer output and matching length; this only reads
+            // SAFETY: fixed integer output and matching length. This only reads
             // the kernel's queued socket error, it changes no routing or policy.
             let result = unsafe {
                 libc::getsockopt(
@@ -244,7 +244,7 @@ impl Qrtr {
                 }
                 Lookup::Complete => break,
                 // The modem keeps sending to the fixed port while this repeats
-                // publication; keep its requests instead of dropping them.
+                // publication. Keep its requests instead of dropping them.
                 Lookup::Keep if self.deferred.len() < MAX_DEFERRED_PACKETS => {
                     self.deferred.push_back((peer, data))
                 }
@@ -253,7 +253,7 @@ impl Qrtr {
         }
         // The paired kernel reserves this port and service for the single local
         // DCM role, so an unanswered lookup is no sign of a competing local
-        // publisher. Publish anyway; the lookup stays active as conflict watch.
+        // publisher. Publish anyway. The lookup stays active as conflict watch.
         self.control(Control::server(NEW_SERVER, self.local))?;
         self.published = true;
         Ok(Publication::Ready)
@@ -280,7 +280,7 @@ fn receive_packet(
         iov_len: bytes.len(),
     };
     // SAFETY: msghdr is a C POD structure. Null ancillary pointers and zero
-    // lengths are valid; all named buffers stay live through this syscall.
+    // lengths are valid. All named buffers stay live through this syscall.
     let mut message: libc::msghdr = unsafe { mem::zeroed() };
     message.msg_name = (address as *mut Address).cast();
     message.msg_namelen = mem::size_of::<Address>() as libc::socklen_t;
@@ -326,7 +326,7 @@ mod receive_tests {
                 .unwrap()
                 .is_none()
         );
-        // The rejected packet is consumed; an exact-sized next packet is intact.
+        // The rejected packet is consumed. An exact-sized next packet is intact.
         sender.send(&[2; 8]).unwrap();
         assert_eq!(
             receive_packet(receiver.as_raw_fd(), &mut buffer, &mut address)

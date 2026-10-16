@@ -18,7 +18,7 @@ package {
 // ServiceManager.isDeclared()/waitForDeclaredService() used to reach the
 // VINTF service. Soong then marks the app usesNonSdkApi, which lifts runtime
 // hidden-API enforcement for system apps (ApplicationInfo
-// .isAllowedToUseHiddenApis); no @hide API is used.
+// .isAllowedToUseHiddenApis). No @hide API is used.
 
 android_app {
     name: "DiamaneOSImsBroker",

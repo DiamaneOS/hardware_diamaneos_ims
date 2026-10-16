@@ -29,7 +29,7 @@ import de.diamaneos.wlan.IReporter;
 import de.diamaneos.wlan.Snapshot;
 import de.diamaneos.wlan.ReporterStatus;
 
-/** Passive primary-user observations; no exported components, scans or network setters. */
+/** Passive primary-user observations. No exported components, scans or network setters. */
 public final class ObserverApp extends Application {
     private static final String SERVICE = "de.diamaneos.wlan.IReporter/default";
     private static final boolean DEBUG = Build.isDebuggable();
@@ -178,7 +178,7 @@ public final class ObserverApp extends Application {
             try {
                 binder.unlinkToDeath(death, 0);
             } catch (java.util.NoSuchElementException ignored) {
-                // Registration raced with process death; no recipient remains.
+                // Registration raced with process death. No recipient remains.
             }
         }
         reporter = null; binder = null; lifetime = null; death = null;
@@ -215,7 +215,7 @@ public final class ObserverApp extends Application {
             if (DEBUG) {
                 try {
                     ReporterStatus status = reporter.getStatus(generation);
-                    // Numeric connectivity facts only; no link or SIM identifiers.
+                    // Numeric connectivity facts only. No link or SIM identifiers.
                     int flags = (snapshot.enabled ? 1 : 0) | (snapshot.connected ? 2 : 0)
                             | (snapshot.validated ? 4 : 0) | (snapshot.defaultRoute ? 8 : 0);
                     String summary = "observation=" + flags + " primary=" + status.primaryStage
@@ -239,7 +239,7 @@ public final class ObserverApp extends Application {
             }
         } catch (RemoteException | RuntimeException ignored) {
             // No payload/exception logging. Failure cannot refresh the observation
-            // lease; the reporter expires it and withdraws availability.
+            // lease. The reporter expires it and withdraws availability.
             disconnectReporter();
             unavailable("Observer delivery unavailable");
         }

@@ -14,7 +14,7 @@
 //! hardware address and generates the addresses of its other interfaces.
 //! Stock checks nothing.
 //!
-//! [`WlanMac`] has no `Display` and a redacting `Debug`; the only way out is
+//! [`WlanMac`] has no `Display` and a redacting `Debug`. The only way out is
 //! [`WlanMac::mac_file`], which goes straight into the file.
 
 use crate::eui48;

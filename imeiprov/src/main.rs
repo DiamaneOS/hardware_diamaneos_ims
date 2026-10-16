@@ -7,8 +7,8 @@
 //! provisions the modem's NV item 550 over the TCL QMI service and verifies by
 //! reading back. With `--bt-address` it instead reads the factory Bluetooth
 //! address from the same partition, validates it and sets it in one property
-//! (`ro.vendor.diamaneos.bt.factory_address`), which only this domain may set;
-//! the IMEI modes set no property. With `--wlan-mac` it reads the factory Wi-Fi
+//! (`ro.vendor.diamaneos.bt.factory_address`), which only this domain may set.
+//! The IMEI modes set no property. With `--wlan-mac` it reads the factory Wi-Fi
 //! MAC, validates it and writes the WLAN driver's MAC file to a RAM-backed path
 //! only this domain may write ([`WLAN_MAC_FILE`]). It opens no non-QRTR sockets
 //! (besides the log and property sockets), writes no region data and no
@@ -35,7 +35,7 @@ use std::time::Duration;
 /// QRTR service id of the Fairphone TCL QMI service (TCT_QMI), from the stock
 /// service object at 0x13e30.
 const SERVICE_ID: u32 = 0x2ff;
-/// Stock does not filter by instance; 0 matches the modem's advertised service.
+/// Stock does not filter by instance. 0 matches the modem's advertised service.
 const SERVICE_INSTANCE: u32 = 0;
 /// Dedicated vendor UID (config.fs). Root is allowed only for lab dry-runs.
 const EXPECTED_UID: u32 = 2994;
@@ -46,7 +46,7 @@ const EXPECTED_UID: u32 = 2994;
 const BT_ADDRESS_PROPERTY: &str = "ro.vendor.diamaneos.bt.factory_address";
 
 /// Written once per boot by `--wlan-mac`. The tree is in RAM (tmpfs), created
-/// by init before this runs (`imeiprovd.rc`); the device's ueventd.rc lists
+/// by init before this runs (`imeiprovd.rc`). The device's ueventd.rc lists
 /// `/mnt/vendor/wlan_mac/` as a firmware directory, so ueventd serves this file
 /// when the driver asks for `wlan/qca_cld/qca6750/wlan_mac.bin`.
 const WLAN_MAC_FILE: &str = "/mnt/vendor/wlan_mac/wlan/qca_cld/qca6750/wlan_mac.bin";
@@ -222,7 +222,7 @@ fn parse_mode() -> Option<(Mode, Option<u32>)> {
 /// nothing is set and the HCI implementation keeps its stored or generated
 /// address, as before. Logs the outcome only, never the address. No seccomp
 /// filter: the process reads one window of a root-owned partition, makes one
-/// property call and exits; SELinux confines it.
+/// property call and exits. SELinux confines it.
 fn provide_bt_address() -> i32 {
     let Ok(raw) = trace::read_bt_address(trace::PATH) else {
         warn("bt address: missing");
@@ -247,7 +247,7 @@ fn provide_bt_address() -> i32 {
 /// before. The file is created new (never replaced, never through a link),
 /// readable by its owner only (ueventd reads it with its own capabilities) and
 /// never read back here. Logs the outcome only, never the MAC. No seccomp
-/// filter, as for `--bt-address`; SELinux confines it.
+/// filter, as for `--bt-address`. SELinux confines it.
 fn provide_wlan_mac() -> i32 {
     let Ok(raw) = trace::read_wlan_mac(trace::PATH) else {
         warn("wlan mac: missing");
@@ -269,7 +269,7 @@ fn provide_wlan_mac() -> i32 {
     }
 }
 
-/// Create `path` (it must not exist; O_EXCL also refuses a symbolic link),
+/// Create `path` (it must not exist, O_EXCL also refuses a symbolic link),
 /// mode 0400, and write `contents`.
 fn write_new_file(path: &str, contents: &[u8]) -> std::io::Result<()> {
     let mut file = std::fs::OpenOptions::new()
@@ -367,7 +367,7 @@ fn set_property(name: &str, value: &str) -> bool {
         return false;
     };
     // SAFETY: both pointers reference live NUL-terminated C strings for the
-    // duration of the synchronous call; bionic copies them into its request.
+    // duration of the synchronous call. bionic copies them into its request.
     unsafe { __system_property_set(name.as_ptr(), value.as_ptr()) == 0 }
 }
 
@@ -398,7 +398,7 @@ fn emit(priority: i32, msg: &str) {
     }
     if let Ok(text) = CString::new(msg) {
         // SAFETY: both pointers reference live NUL-terminated C strings for the
-        // duration of the synchronous call; liblog copies the text.
+        // duration of the synchronous call. liblog copies the text.
         unsafe {
             __android_log_write(
                 priority as libc::c_int,

@@ -5,7 +5,7 @@
 //! Wire facts reverse-engineered from the stock `tctd` (`imei_build`,
 //! `vendor/fairphone/source/system/tctd/trace_nv_read.c`): NV item 550, a
 //! 9-byte value `[0x08][ (d1<<4)|0x0A ][ (d3<<4)|d2 ] ... [ (d15<<4)|d14 ]`.
-//! The leading nibble 0x0A is the odd-length identity marker; byte 0 (0x08) is
+//! The leading nibble 0x0A is the odd-length identity marker. Byte 0 (0x08) is
 //! the count of IMEI bytes that follow.
 //!
 //! `Imei` deliberately has no `Display` and a redacting `Debug`, so no code path
@@ -44,13 +44,13 @@ impl fmt::Debug for Imei {
 }
 
 impl Imei {
-    /// 15 numeric digit values (0..=9). The only accessor; keep it off any
+    /// 15 numeric digit values (0..=9). The only accessor. Keep it off any
     /// logging path.
     pub fn digits(&self) -> [u8; DIGITS] {
         self.digits
     }
 
-    /// Build from 15 numeric digit values. Checks range only; use
+    /// Build from 15 numeric digit values. Checks range only. Use
     /// [`Imei::is_luhn_valid`] for the check-digit test.
     pub fn from_digits(digits: [u8; DIGITS]) -> Result<Self, Error> {
         if digits.iter().any(|&d| d > 9) {
@@ -60,7 +60,7 @@ impl Imei {
     }
 
     /// Decode 15 ASCII bytes ('0'..='9'). The traceability partition stores the
-    /// IMEI as plain ASCII (stock `start` reads 15 bytes; `imei_build` validates
+    /// IMEI as plain ASCII (stock `start` reads 15 bytes, `imei_build` validates
     /// each is a digit before packing).
     pub fn from_ascii(ascii: &[u8]) -> Result<Self, Error> {
         let bytes: [u8; DIGITS] = ascii.try_into().map_err(|_| Error::Length)?;
@@ -76,7 +76,7 @@ impl Imei {
 
     /// Luhn check over all 15 digits (the 15th is the check digit). The
     /// Qualcomm placeholder IMEI the unprovisioned modem reports is not
-    /// Luhn-valid, so this check also rejects it; no placeholder constant is
+    /// Luhn-valid, so this check also rejects it. No placeholder constant is
     /// embedded (privacy).
     // `% 10 == 0` is kept over `is_multiple_of` for portability across the
     // build's Rust toolchain.
@@ -148,7 +148,7 @@ impl PairCheck {
 }
 
 /// Validate a decoded pair. An IMEI is valid when it has 15 digits (guaranteed
-/// by `Imei`) and a correct Luhn check digit; the pair must also be distinct.
+/// by `Imei`) and a correct Luhn check digit. The pair must also be distinct.
 pub fn check_pair(slot1: &Imei, slot2: &Imei) -> PairCheck {
     PairCheck {
         slot1_valid: slot1.is_luhn_valid(),

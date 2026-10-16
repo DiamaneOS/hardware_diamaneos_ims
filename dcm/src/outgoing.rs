@@ -86,7 +86,7 @@ impl Retained {
     pub fn wire_size_bound(&self) -> usize {
         self.packet.wire_size_bound()
     }
-    /// A session's terminal result; the adapter's queue keeps room for these.
+    /// A session's terminal result. The adapter's queue keeps room for these.
     pub fn is_terminal(&self) -> bool {
         matches!(self.packet.fence, Fence::Terminal(_))
     }
@@ -110,7 +110,7 @@ pub(crate) struct PeerLife {
     pub epoch: u64,
 }
 
-// Activation is used by the engine's prepare path; keep construction there so
+// Activation is used by the engine's prepare path. Keep construction there so
 // an adapter cannot manufacture a different request or substitute an address.
 pub(crate) fn up_wire(
     sequence: u16,

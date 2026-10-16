@@ -38,7 +38,7 @@ rust_test_host {
 }
 // IMEI provisioning: pure decode/validate/codec library (host-testable) and the
 // one-shot vendor binary that reads the traceability partition and writes modem
-// NV 550 over the TCL QMI service; other modes set the factory
+// NV 550 over the TCL QMI service. Other modes set the factory
 // Bluetooth address property and write the WLAN driver's factory
 // MAC file (--wlan-mac). See docs/imei-provisioning.md.
 rust_library {

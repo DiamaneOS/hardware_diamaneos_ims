@@ -8,7 +8,7 @@
 //! `ro.vendor.bt.boot.macaddr`, the property the Qualcomm HCI implementation
 //! reads before its generated-address fallback. Stock checks nothing.
 //!
-//! [`BdAddr`] has no `Display` and a redacting `Debug`; the only way out is
+//! [`BdAddr`] has no `Display` and a redacting `Debug`. The only way out is
 //! [`BdAddr::property_value`], which goes straight into the property.
 
 use crate::eui48::{self, Fault};
@@ -93,8 +93,8 @@ impl From<Fault> for Error {
     }
 }
 
-/// Checks an address given most significant byte first. Stock does no checks;
-/// these reject only values that cannot be a factory-assigned device address:
+/// Checks an address given most significant byte first. Stock does no checks.
+/// These reject only values that cannot be a factory-assigned device address:
 /// the EUI-48 checks shared with the Wi-Fi MAC (`eui48::check`) plus the
 /// reserved inquiry LAPs.
 pub fn validate(bytes: &[u8; LEN]) -> Result<(), Error> {

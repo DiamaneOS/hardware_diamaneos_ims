@@ -37,13 +37,13 @@ import java.util.List;
  * <ul>
  *   <li>Only IMS or EIMS, on TRANSPORT_CELLULAR, built in the same order as
  *       Tracker.createNetworkRequest (0x00f8e0, 0x00f964). Never MMTEL.
- *   <li>With a slot, the request carries that slot's subscription; without a slot, it carries none
+ *   <li>With a slot, the request carries that slot's subscription. Without a slot, it carries none
  *       (startDataCall, 0x00fe74).
  *   <li>While the slot has no active subscription, the request waits and is filed on the next
  *       subscription change (startDataCall "pending list", updateSubInfoReady 0x010188). This
  *       applies to emergency requests too.
  *   <li>No timeout in the broker: ConnectivityManager.requestNetwork() without one.
- *   <li>The request is held until the daemon releases it; a lost network does not drop it (Tracker
+ *   <li>The request is held until the daemon releases it. A lost network does not drop it (Tracker
  *       callbacks 0x00f418 to 0x00f5fc, tearDownDataCall 0x0100ac).
  * </ul>
  *
@@ -69,7 +69,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
     }
 
     /**
-     * The daemon's UID: AID_VENDOR_IMSDCM in vintf/config.fs. Keep the two equal; a mismatch makes
+     * The daemon's UID: AID_VENDOR_IMSDCM in vintf/config.fs. Keep the two equal. A mismatch makes
      * the broker ignore the daemon.
      */
     private static final int DAEMON_UID = 2990;
@@ -119,7 +119,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
 
     @Override
     public void onDaemonLost() {
-        // The daemon tells the modem again when it restarts; hold nothing for
+        // The daemon tells the modem again when it restarts. Hold nothing for
         // a daemon that is gone.
         mDcm = null;
         ++mBinderEpoch;
@@ -191,7 +191,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
                         || request.type == PdnType.EMERGENCY);
     }
 
-    /** One key per (slot, type); slot is -1..2 and type 1..2 after isValid(). */
+    /** One key per (slot, type). Slot is -1..2 and type 1..2 after isValid(). */
     private static int key(int slot, int type) {
         return ((slot + 1) << 8) | (type & 0xff);
     }
@@ -244,7 +244,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
         try {
             mConnectivityManager.requestNetwork(builder.build(), tracker, mHandler);
         } catch (RuntimeException e) {
-            // SecurityException without the permission; also
+            // SecurityException without the permission. Also
             // IllegalArgumentException and TooManyRequestsException.
             Log.e(TAG, "IMS network request refused: " + e.getClass().getSimpleName());
             mTrackers.remove(key(tracker.slot, tracker.type));
@@ -279,7 +279,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
             int reason = tracker.readinessReason();
             if (reason != tracker.lastReadiness) {
                 tracker.lastReadiness = reason;
-                // No identifiers; categories describe only this callback's state.
+                // No identifiers. Categories describe only this callback's state.
                 Log.i(TAG, "readiness=" + reason);
             }
         }
@@ -287,7 +287,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
         if (info == null && tracker.isSettling()) {
             // ConnectivityService moved the request to a new network: decide once
             // its capabilities and link properties are both known. Stock reports
-            // the new network without a down; a mismatch still fails closed then.
+            // the new network without a down. A mismatch still fails closed then.
             return;
         }
         if (info == null) {
@@ -329,7 +329,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
         reportFailed(tracker.request(), PdnFailure.UNAVAILABLE);
     }
 
-    // Reports to the daemon (oneway; a dead daemon is handled by binderDied)
+    // Reports to the daemon (oneway, a dead daemon is handled by binderDied)
 
     private void reportUp(PdnTracker tracker, PdnInfo info) {
         mHandler.removeCallbacksAndMessages(tracker);
@@ -355,7 +355,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
         }
     }
 
-    /** Reports the held request's current state again later; unregister() cancels it. */
+    /** Reports the held request's current state again later. unregister() cancels it. */
     private void retryState(PdnTracker tracker) {
         mHandler.postDelayed(
                 () -> {

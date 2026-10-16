@@ -74,7 +74,7 @@ impl Interface for Service {
             .lock()
             .map_err(|_| binder::StatusCode::FAILED_TRANSACTION)?;
         let waits = self.queue_waits.load(Ordering::Relaxed);
-        // Current switch properties; None where the build does not honor them.
+        // Current switch properties. None where the build does not honor them.
         let switch = |name| {
             self.debug_controls
                 .then(|| prop(name).as_deref() == Some("1"))
@@ -226,7 +226,7 @@ fn request(r: Request) -> PdnRequest {
 }
 /// The reserved port cannot be bound while the old descriptor owns it, so there
 /// is no socket to serve until a replacement binds. Retry with bounded backoff
-/// instead of stopping the daemon; None only when asked to stop meanwhile.
+/// instead of stopping the daemon. None only when asked to stop meanwhile.
 fn rebind(
     socket: Qrtr,
     engine: &mut Engine,
@@ -257,7 +257,7 @@ fn run() -> io::Result<()> {
         return Err(io::Error::other("wrong daemon uid"));
     }
     // Vendor Binder does not expose requesting-SID. The broker-only SELinux
-    // neverallows are the first authentication layer; never operate without them.
+    // neverallows are the first authentication layer. Never operate without them.
     if std::fs::read_to_string("/sys/fs/selinux/enforce")?.trim() != "1" {
         return Err(io::Error::other("enforcing SELinux required"));
     }
@@ -298,7 +298,7 @@ fn run() -> io::Result<()> {
     const PUBLICATION_RETRY_DELAY_MS: u64 = 30_000;
     const MAX_RECEIVED_PACKETS_PER_CYCLE: usize = 32;
     // Short receive waits only while output is queued or input is flowing. When
-    // idle, a Binder event waits at most IDLE_WAIT_MS; switches are read each second.
+    // idle, a Binder event waits at most IDLE_WAIT_MS. Switches are read each second.
     const BUSY_WAIT_MS: u64 = 25;
     const IDLE_WAIT_MS: u64 = 100;
     const KILL_SWITCH_PERIOD_MS: u64 = 1_000;
@@ -307,7 +307,7 @@ fn run() -> io::Result<()> {
     let mut emergency_enabled = true;
     let mut input = false;
     let mut dispatch = Dispatch::default();
-    // SAFETY: handler only stores an atomic flag; no allocation or I/O in signals.
+    // SAFETY: handler only stores an atomic flag. No allocation or I/O in signals.
     unsafe {
         libc::signal(libc::SIGINT, stop as *const () as libc::sighandler_t);
         libc::signal(libc::SIGTERM, stop as *const () as libc::sighandler_t);
@@ -432,7 +432,7 @@ fn run() -> io::Result<()> {
                     match Control::decode(&bytes) {
                         Some(c) if c.conflicts_with(socket.local()) => {
                             engine.publisher_conflict();
-                            vec![] // Preserve live clients; ownership is a separate kernel gate.
+                            vec![] // Preserve live clients. Ownership is a separate kernel gate.
                         }
                         Some(c) if c.remote_server(socket.local()) => {
                             engine.remote_publisher();

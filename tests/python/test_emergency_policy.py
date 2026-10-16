@@ -83,7 +83,7 @@ class EmergencyPolicyTest(unittest.TestCase):
         options = {line.split()[0] for line in service.splitlines()[1:]
                    if line.strip() and not line.strip().startswith('#')}
         self.assertIn('disabled', options)
-        # A crash must never reboot the phone; init restarts the daemon.
+        # A crash must never reboot the phone. init restarts the daemon.
         self.assertFalse(options & {'critical', 'oneshot'}, options)
 
     def test_broker_runs_before_unlock_and_cannot_be_disabled(self):

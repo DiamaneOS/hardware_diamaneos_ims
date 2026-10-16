@@ -176,7 +176,7 @@ public final class EmergencyBrokerTest {
             handler.drain();
         }
 
-        /** The daemon dies and a new one registers; returns the old one. */
+        /** The daemon dies and a new one registers. Returns the old one. */
         Daemon restartDaemon() throws Exception {
             Daemon next = new Daemon();
             ServiceManager.daemons.add(next);

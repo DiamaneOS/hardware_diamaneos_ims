@@ -7,7 +7,7 @@ package vendor.diamaneos.hardware.imsdcm;
 
 /**
  * What the broker reports about a connected network. The addresses are the
- * ones Android's LinkProperties carry for it; they are carrier-assigned, so
+ * ones Android's LinkProperties carry for it. They are carrier-assigned, so
  * neither side may log them.
  */
 @VintfStability

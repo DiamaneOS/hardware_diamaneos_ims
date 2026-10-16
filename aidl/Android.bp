@@ -9,7 +9,7 @@ package {
 // IImsDcm/default) and the system_ext broker app (Java, client, implements
 // IPdnBroker). VINTF-stable because it crosses the system/vendor boundary.
 //
-// V1 is frozen. Keep its API dump/hash immutable; additive changes must use
+// V1 is frozen. Keep its API dump/hash immutable. Additive changes must use
 // the platform update-api/freeze-api flow and a new version.
 
 aidl_interface {
