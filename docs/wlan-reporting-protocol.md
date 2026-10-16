@@ -3,11 +3,10 @@
 `wlan/` is a memory-safe, socket-free codec for an observed subset of Qualcomm
 DSD STA reporting.
 
-- Host-tested; used by the device-selected reporter.
+- Host-tested and used by the reporter a device selects.
 - Cannot send modem requests, observe Wi-Fi, publish a service or change
   routing. Not a full CNE replacement.
-- Basic FP6 calling has been shown with the adapter. Open points:
-  [open qualification](#open-qualification).
+- Device limits: see [limits](#limits).
 
 The wire subset was bound independently to the authenticated FP6.QREL.16.100.0
 `libqmiservices.so` IDL descriptors, the `libwms.so` STA builder and the
@@ -18,21 +17,21 @@ describes the IDL table format.
 | Item | Observed contract |
 | --- | --- |
 | Service | DSD `0x2a`, major version 1 |
-| STA status request | `0x20`; seven-byte QRTR QMI service header, no QMUX header |
+| STA status request | `0x20`, seven-byte QRTR QMI service header, no QMUX header |
 | TLV `0x01` | Required six-byte BSSID |
 | TLV `0x10` | Optional IPv4 address as a little-endian numeric uint32 |
 | TLV `0x11` | Optional 16 IPv6 octets followed by a one-byte prefix length |
 | TLVs `0x13`, `0x14` | Optional first/second IPv4 DNS server as little-endian numeric uint32 |
 | TLVs `0x15`, `0x16` | Optional first/second IPv6 DNS server as 16 octets |
-| TLV `0x1f` | Optional uint32 Wi-Fi mode; observed STA value 2 |
-| TLV `0x21` | Optional uint32 connection state; 0 disconnected, 1 not validated, 2 validated |
+| TLV `0x1f` | Optional uint32 Wi-Fi mode, observed STA value 2 |
+| TLV `0x21` | Optional uint32 connection state: 0 disconnected, 1 not validated, 2 validated |
 | TLV `0x24` | Optional one-byte default-route boolean from Android default-network selection |
-| Default-profile status | Request `0x43`: required uint32 profile0 in TLV `0x01`, optional uint32 state in TLV `0x10`; 0 met, 1 not met |
+| Default-profile status | Request `0x43`: required uint32 profile0 in TLV `0x01`, optional uint32 state in TLV `0x10`: 0 met, 1 not met |
 | Response | Result-only TLV `0x02`, uint16 result and error |
 
 - The stock request has other optional fields. The codec deliberately has no
   API for SSID, scan results or unknown fields.
-- The stock STA builder sets IPv6 prefix 64; the codec keeps the actual
+- The stock STA builder sets IPv6 prefix 64, but the codec keeps the actual
   supplied prefix instead of inventing one.
 
 ## Withdrawal and startup
@@ -66,13 +65,13 @@ describes the IDL table format.
 
 - **Loss:** profile0 not met, then STA withdrawal, then the actual
   administrative switch state. The authenticated FP6.QREL.16.111.0 runtime
-  callback also sends profile before STA; this avoids leaving the old positive
+  callback also sends profile before STA, which avoids leaving the old positive
   profile during disconnection.
 - **Positive updates:** the switch when required, then the current profile,
   then STA, as the stock callback does on connected inputs. An acknowledged
   switch bypass still sends profile before STA.
 - Availability settles only after the final station acknowledgement. Each step
-  needs its own matching acknowledgement; a rejected profile stops the session,
+  needs its own matching acknowledgement. A rejected profile stops the session,
   and an obsolete transaction cannot settle a replacement observation.
 - Both subscription bindings stay independent.
 - Switch notifications go out for actual adapter state changes or
@@ -86,12 +85,13 @@ describes the IDL table format.
 ## Sensitive data and addresses
 
 - Sensitive observations have no `Debug` or `Display` implementation. Encoded
-  byte buffers still contain identifiers; callers must not log or persist them.
+  byte buffers still contain identifiers, so callers must not log or persist
+  them.
 - The observer uses the shared Android preferred-address flag rule: reject
   failed-DAD or deprecated addresses, and tentative ones unless also
   optimistic.
 - The codec can check address values but not their real link state. No address
-  state is fabricated; the other address/snapshot checks stay in force.
+  state is fabricated, and the other address/snapshot checks stay in force.
 
 Process isolation, permission review and lifecycle requirements: see
 [the reporting design](wlan-reporting-design.md).
@@ -99,11 +99,11 @@ Process isolation, permission review and lifecycle requirements: see
 ## Same-link DNS metadata
 
 - The stock `libwms.so` STA builder has IPv4 DNS slots at native offsets
-  0x28/0x30 and IPv6 DNS slots at 0x35/0x46; its diagnostic format strings
+  0x28/0x30 and IPv6 DNS slots at 0x35/0x46. Its diagnostic format strings
   name DNS addresses 1/2 and DNS V6 addresses 1/2.
 - The authenticated DSD IDL maps them to request 0x20 TLVs 0x13/0x14 (uint32
   little-endian numeric IPv4) and 0x15/0x16 (16 IPv6 octets). Stock reverses
-  the IPv4 in_addr before storage; IPv6 is copied unchanged.
+  the IPv4 in_addr before storage. IPv6 is copied unchanged.
 - These are resolver addresses, not local interface addresses. No fabricated
   resolver or fallback.
 - The observer supplies at most the first two distinct DNS servers per family
@@ -112,20 +112,19 @@ Process isolation, permission review and lifecycle requirements: see
   rejects unspecified, loopback, multicast, mapped-IPv6 and invalid IPv4
   addresses, slot gaps and duplicates. Link-local resolvers are valid only in
   the reported Wi-Fi link context.
-- DNS changes replace the desired snapshot; stale pending reports are not
+- DNS changes replace the desired snapshot, and stale pending reports are not
   retried. Withdrawal carries no resolver metadata.
 - Like the stock report, this gives modem firmware the link's resolver
   addresses. It issues no DNS queries and changes no Private DNS or VPN
   settings. Diagnostics gain no SSID, signal measurement, optional capability,
   packet contents or resolver address.
-- Adding this stock metadata closes an identified omission; it does not by
-  itself prove DNS caused the VoWiFi failure.
 
 ## Default-route metadata
 
 - The authenticated stock STA builder copies its default-route boolean to
   native request offset `0xe5` (presence byte `0xe4`). The IDL maps it to
-  optional one-byte TLV `0x24`; the stock sender labels it `is_default_route`.
+  optional one-byte TLV `0x24`, which the stock sender labels
+  `is_default_route`.
   It is separate from Android validation and connection-state TLV `0x21`.
 - The observer uses default-network callback capabilities with its existing
   ACCESS_NETWORK_STATE permission. Android delivers them regardless of whether
@@ -137,7 +136,7 @@ Process isolation, permission review and lifecycle requirements: see
 - **Unchanged** for a VPN default without a physical transport whose underlying
   network is absent or not yet known (as during lockdown reconnects).
 - A replacement default keeps the previous answer until its own capabilities
-  classify it; late capabilities/loss from the old network are ignored.
+  classify it. Late capabilities/loss from the old network are ignored.
 - Not used: getActiveNetwork(), which can hide the default from callers
   without INTERNET permission, and hidden Connectivity APIs.
 - No route changes, VPN bypass, claim of carrier authentication, new
@@ -150,8 +149,8 @@ Process isolation, permission review and lifecycle requirements: see
 ## Default connectivity profile
 
 - The authenticated FP6.QREL.16.111.0 `libwms.so` callback checks connected
-  state, default-route state and Android validation; profile0 is met only when
-  all three hold. The constructor creates and starts that fixed default profile
+  state, default-route state and Android validation, and profile0 is met only
+  when all three hold. The constructor creates and starts that fixed default profile
   with identifier 0.
 - A connectivity indicator, not a bandwidth, signal, latency or carrier QoS
   measurement.
@@ -159,22 +158,22 @@ Process isolation, permission review and lifecycle requirements: see
   missing, disconnected, unvalidated or non-default observations report not
   met. It never accepts a caller-selected profile, a quality estimate or
   arbitrary modem request bytes.
-- Qualified measurements for nondefault profiles are not implemented; their
-  unavailable completion is separate from this profile.
+- Nondefault profiles have no qualified measurements. Their unavailable
+  completion is separate from this profile.
 - STA and default-profile replies must both match the current transaction and
   verified modem peer before the session settles.
-- Startup clears both prior states; withdrawal clears profile0 as well as STA.
+- Startup clears both prior states. Withdrawal clears profile0 as well as STA.
   Loss or replacement while a positive update is pending stops it being
   retried.
-- Negative replies and bounded retry exhaustion fail the session; unsupported
-  firmware is not success. The reply uses the existing result-only parser and
+- Negative replies and bounded retry exhaustion fail the session, and
+  unsupported firmware is not success. The reply uses the existing result-only parser and
   fixed bounds.
 
 ## Keepalive operation failure
 
 - The authenticated FP6.QREL.16.111.0 stock handler decodes indication 0x41,
   then sends operation status request 0x42: a negative local result becomes
-  required TLV 1, uint32 little-endian 1; nonnegative results become 0. No
+  required TLV 1, uint32 little-endian 1, and nonnegative results become 0. No
   distinct "unsupported" meaning is assumed.
 - This adapter cannot perform either operation and returns generic failure for
   structurally valid start and stop instructions.
@@ -191,11 +190,10 @@ Process isolation, permission review and lifecycle requirements: see
   packet per channel, connectivity first.
 - Queue overflow leaves a sticky optional-channel error (-4) until context
   replacement, without keeping instruction data or blocking core connectivity.
-  Rejection/timeout blocks this reply channel until context replacement;
+  Rejection/timeout blocks this reply channel until context replacement, and
   transaction exhaustion needs a new session.
-- This closes a missing failure contract. No keepalive functionality,
-  nondefault quality profiles, network traffic or cancellation success is
-  claimed.
+- No keepalive functionality, nondefault quality profiles, network traffic or
+  cancellation success is claimed.
 
 ## Profile notification validation
 
@@ -204,12 +202,12 @@ indications:
 
 - **Initialization `0x45`:** required uint32 type (known types 4–43), maximum
   62-byte body. Optional threshold fields 10/11, 14/15 and 16/17 are two bytes
-  wide; optional 12 is a count byte plus at most 10 SIM-identifier bytes;
+  wide. Optional 12 is a count byte plus at most 10 SIM-identifier bytes, and
   optional 13 is an eight-byte opaque identifier.
 - **Selection `0x3f`:** required uint64 mask, maximum 36-byte body. Optional 10
-  is a count byte plus at most 10 uninterpreted bytes; optional 11 is an
+  is a count byte plus at most 10 uninterpreted bytes, and optional 11 is an
   eight-byte opaque identifier.
-- Framing, duplicate/unknown TLVs, truncation and widths are checked; threshold
+- Framing, duplicate/unknown TLVs, truncation and widths are checked. Threshold
   units and subscriber identity are not.
 - Stock maps bits 32–63 to types 4–35, bits 3–9 to types 36–42, and bit 16 to
   type 43.
@@ -225,38 +223,35 @@ indications:
 Ownership (the pure `profiles` module):
 
 - At most 40 entries per verified subscription context, keyed by type and
-  normalized opaque measurement ID. Absent and explicit zero IDs share a key;
-  nonzero IDs stay private.
+  normalized opaque measurement ID. Absent and explicit zero IDs share a key,
+  and nonzero IDs stay private.
 - The limit is downstream containment, not a stock key-space limit. When full,
   new initialization is rejected without evicting entries. Duplicate
   initialization is ignored. Thresholds and SIM bytes are not kept.
 - Selection starts only entries already initialized for that measurement ID.
   Cleared known bits (or a zero selection) destroy those entries, including
-  unstarted ones. There is no invented teardown status; a later selection needs
-  initialization again.
+  unstarted ones. There is no invented teardown status, so a later selection
+  needs initialization again.
 - Unknown bits are rejected before any change, a conservative difference from
   stock's known-bit-only dispatch.
-- On unsupported lifecycle input the runtime must stop/invalidate the optional
-  channel rather than keep a stale positive assessment. Malformed and overflow
-  cases also need explicit runtime handling: the reporter stops the channel on
-  unknown lifecycle shapes and capacity failures.
+- On unsupported, malformed or overflowing lifecycle input the reporter stops
+  the optional channel rather than keep a stale positive assessment.
 
 Report tokens:
 
 - A selected entry can yield a private report token. It encodes only request
-  0x43 with QUALITY_NOT_MET 1 and CQ_FAIL_INCONCLUSIVE 3; it cannot encode
-  positive quality. Measurement ID TLV 12 is included only when nonzero;
+  0x43 with QUALITY_NOT_MET 1 and CQ_FAIL_INCONCLUSIVE 3. It cannot encode
+  positive quality. Measurement ID TLV 12 is included only when nonzero, and
   unknown band is omitted.
 - This declares unavailable qualified measurements, not measured link failure
-  or offload success. Native modem acknowledgement and calling have been
-  observed on development images.
+  or offload success.
 - Tokens carry the entry revision and a runtime-owned context generation.
   Generations must be globally unique across both subscriptions and never
-  reused; stop on exhaustion.
+  reused. Stop on exhaustion.
 - Revalidate a token before sending or retrying. Match the exact pending
   transaction and current endpoint/generation before acknowledging it.
-- Destruction, reinitialization and context replacement invalidate old tokens;
-  a late ACK cannot mark the replacement reported or complete a reinitialized
+- Destruction, reinitialization and context replacement invalidate old tokens,
+  so a late ACK cannot mark the replacement reported or complete a reinitialized
   entry.
 - No identity or packet buffer may enter diagnostics.
 
@@ -274,26 +269,25 @@ Reporter runtime:
 - Every transport cycle advances core, keepalive and profile deadlines, sending
   at most three packets in that priority order, so core control continues
   fairly when optional channels are busy or unavailable. All channels share the
-  nonwrapping transaction allocator; default and nondefault profile replies use
-  different matched transactions.
+  nonwrapping transaction allocator, and default and nondefault profile replies
+  use different matched transactions.
 - A negative ACK or timeout blocks optional reporting without claiming core
   failure. Transaction exhaustion requests bounded session renewal only after
   allocated core work drains.
-- Protocol activation does not depend on `ro.debuggable`; diagnostic traces and
-  histograms are not part of this path.
-- This closes response contracts. It does not implement proprietary quality
-  policy, qualified positive measurements or keepalive offload, or prove every
-  carrier's recovery behavior.
+- Protocol activation does not depend on `ro.debuggable`, and diagnostic traces
+  and histograms are not part of this path.
+- It does not implement proprietary quality policy, qualified positive
+  measurements or keepalive offload, or prove every carrier's recovery
+  behavior.
 
-## Open qualification
+## Limits
 
-Each of these needs device qualification:
+Not verified on a device:
 
-- whether this subset is enough for the selected firmware;
-- keeping the supplied IPv6 prefix instead of stock's fixed 64;
-- the zero-BSSID startup form, on each new firmware integration;
-- native radio/Wi-Fi recovery, reconnect and the broader lifecycle;
-- whether modem-originated DNS follows Android's Private DNS and VPN policies;
-- whether the full report sequence resolves FP6 reconnects;
-- the native carrier effect of keepalive failure replies, and the recovery and
-  carrier effects of unavailable-measurement completions.
+- whether this subset is enough for each firmware
+- keeping the supplied IPv6 prefix instead of stock's fixed 64
+- the zero-BSSID startup form on firmware other than the tested one
+- native radio/Wi-Fi recovery, reconnect and the broader lifecycle
+- whether modem-originated DNS follows Android's Private DNS and VPN policies
+- the carrier effect of keepalive failure replies, and the recovery and carrier
+  effects of unavailable-measurement completions

@@ -1,16 +1,14 @@
 # Wi-Fi reporting to the modem
 
-An opt-in source candidate for the Wi-Fi reporting part of CNE: protocol and
+An opt-in source replacement for the Wi-Fi reporting part of CNE: protocol and
 lifecycle cores, an Android observer and a Rust reporter.
 
-- Native and device qualification are outstanding; this is not a
-  production-ready Wi-Fi calling claim.
 - The Qualcomm IWLAN frontend, radio and modem keep IMS and tunnel handling.
   The DCM daemon keeps IMS/EIMS PDN requests.
 - Both endpoints and their generated interface libraries live in system_ext and
   update together as part of the OS build. Their fixed-field AIDL is a private,
   unstable interface within that partition, not a new vendor HAL.
-- The reporter has its own OEM UID; it does not inherit system UID privileges.
+- The reporter has its own OEM UID and does not inherit system UID privileges.
 
 ## Process boundaries
 
@@ -28,16 +26,16 @@ Observer:
   `NETWORK_SETTINGS`, `CHANGE_WIFI_STATE`, GPS location, subscriber identifiers
   or usage statistics to reproduce CNE's broad behavior.
 - Uses the radio-specific `RADIO_SCAN_WITHOUT_LOCATION` permission for
-  connected-network metadata with location off. Its effective permissions on
-  the selected Android revision need a separate review. It can expose nearby
+  connected-network metadata with location off. Review its effective
+  permissions on each Android release. It can expose nearby
   network identifiers, so it is not privacy-neutral.
 - Do not claim SELinux filters individual methods of the Wi-Fi Binder service.
 - Passive network callbacks only: no scans, no historical scan results. Inspect
-  only the connected network; never forward a scan list.
+  only the connected network and never forward a scan list.
 - The passive reads/listener need ACCESS_NETWORK_STATE or the Wi-Fi listener
-  permission, not INTERNET. The observer declares no INTERNET permission; its
-  direct socket restrictions are unchanged.
-- Platform signing authorizes only declared permissions; it does not justify a
+  permission, not INTERNET. The observer declares no INTERNET permission, and
+  its direct socket restrictions are unchanged.
+- Platform signing authorizes only declared permissions. It does not justify a
   shared UID or broad domain.
 
 Reporter:
@@ -54,7 +52,7 @@ Reporter:
 - The Binder API accepts typed snapshots, not arbitrary bytes, commands, modem
   service addresses, file descriptors or callback-selected destinations.
 - Bound every field and the number of addresses before queuing. Coalesce
-  updates to the latest complete snapshot; keep no event backlog.
+  updates to the latest complete snapshot and keep no event backlog.
 - Snapshots carry a connection generation and monotonic sequence.
 - Validate the configured observer identity through the combined signing,
   seapp, UID and SELinux contract. A package name or client-supplied UID is not
@@ -67,7 +65,7 @@ Reporter:
   Never turn missing metadata into a fabricated address or report an
   unvalidated network as validated.
 - Verify required fields and their precise semantics against the selected
-  protocol before finalizing this API.
+  protocol before changing this API.
 
 ## Modem transaction lifecycle
 
@@ -83,9 +81,9 @@ Reporter:
 - Each indication must be understood and bounded. Never answer unsupported
   requests with fabricated success.
 
-These transitions need explicit protocol and simulation evidence:
+Required behavior for these transitions:
 
-- **Cold start and modem restart:** establish the real current state; never
+- **Cold start and modem restart:** establish the real current state. Never
   replay an old connected snapshot before confirming it still applies.
 - **Wi-Fi disconnect or address loss:** withdraw availability promptly with the
   verified loss operation. Wi-Fi enabled is not Wi-Fi connected.
@@ -95,7 +93,7 @@ These transitions need explicit protocol and simulation evidence:
 - **Rapid reconnect or BSSID change:** invalidate the old generation so a late
   acknowledgement cannot mark the replacement available.
 - **SIM removal or slot reassignment:** invalidate only the affected
-  subscription context; never silently route it to the other subscription.
+  subscription context. Never silently route it to the other subscription.
 - **Reporter restart:** re-establish and reconcile state. An init restart alone
   cannot guarantee the modem has forgotten an earlier availability
   announcement.
@@ -112,7 +110,7 @@ behavior.
 - Keep Wi-Fi identifiers, local addresses, DNS information and network handles
   in memory only for the active snapshot. Never emit them through logs, `Debug`
   formatting, dumpsys, metrics, crash attachments or public fixtures.
-- Avoid needless copies; do not promise cryptographic erasure of managed or
+- Avoid needless copies, but do not promise cryptographic erasure of managed or
   ordinary heap memory.
 - Logs describe transitions and bounded error categories, not payloads.
 - Where a verified required field reveals a Wi-Fi identifier to the modem,
@@ -134,7 +132,7 @@ behavior.
 2. Test the codec and lifecycle with malformed frames, spoofed peers, late
    responses, lost acknowledgements, observer death and modem restart.
 3. Build the real Binder, UID, SELinux and seccomp integration with
-   neverallows; inspect effective permissions instead of trusting manifest
+   neverallows. Inspect effective permissions instead of trusting manifest
    declarations.
 4. Test with the native Qualcomm IWLAN path selected exclusively. Keep a known
    working cellular baseline and verify cellular recovery after each test.
@@ -142,7 +140,7 @@ behavior.
 Selection is explicit, through the two opt-in makefiles. Do not describe the
 DCM broker as implementing this path.
 
-## Current behavior
+## Behavior
 
 Reporter:
 
@@ -159,16 +157,16 @@ Reporter:
 - Failed sessions get bounded packet retries and limited renewals (see
   [scheduling](#scheduling-and-containment-limits)). Modem restart creates
   fresh QRTR clients that bind again. A new observation permits another bounded
-  attempt sequence; it does not bypass the delay or the acknowledgement checks.
+  attempt sequence. It does not bypass the delay or the acknowledgement checks.
 
 Observer:
 
 - Handles one unambiguous connected Internet-capable Wi-Fi network. Withdraws on
-  ambiguous multi-STA observations, loss, revocation or expiry. Multi-STA
-  support is not claimed.
+  ambiguous multi-STA observations, loss, revocation or expiry. Multi-STA is
+  not supported.
 - SIM identity stays modem-owned: the observer has no phone-state permission.
-  The reporter binds only the configured modem subscription contexts;
-  removal/reassignment behavior is qualified on the device.
+  The reporter binds only the configured modem subscription contexts. Removal
+  and reassignment need device tests.
 
 ## Non-sensitive status
 
@@ -179,14 +177,14 @@ generation-bound Binder connection and logs only changed status via Android Log.
   BSSID, IP address, network handle, packet bytes or SIM identity.
 - Ten integers: stage, operation and core error for each context, plus
   keepalive and profile-channel errors for each context.
-- Release observers skip this polling. There are no lifecycle traces,
+- User builds skip this polling. There are no lifecycle traces,
   histograms or exported traffic counters.
 - Diagnostic-query failures do not invalidate an already delivered observation,
   and an unavailable diagnostic connection cannot renew an observation lease.
 - The reporter's socket seccomp filter is not widened for logging. Init routes
   its standard error to `/dev/null`, so stderr is no evidence of device
   progress.
-- Status is sampled asynchronously; it does not establish IMS registration or
+- Status is sampled asynchronously. It does not establish IMS registration or
   call acceptance.
 
 Stages: -1 no endpoint/observation yet, 0 bind, 1 startup clear, 2 switch,
@@ -196,14 +194,10 @@ acknowledged and awaiting an authenticated observation. Settled states need both
 connectivity acknowledgements.
 
 - Operation: the pending or failed message ID.
-- Error: 0 no recorded failure; positive values are QMI errors; -1 timeout;
-  -2 transaction exhaustion; -3 local encoding failure.
+- Error: 0 no recorded failure, positive values are QMI errors, -1 timeout,
+  -2 transaction exhaustion, -3 local encoding failure.
 - Keepalive error -4: a valid instruction discarded at queue capacity. It stays
   visible until context replacement and does not block core connectivity.
-
-The temporary observation-state and address-rejection instrumentation from IPv6
-bring-up has been removed. Address filtering and snapshot consistency checks are
-unchanged.
 
 ## Scheduling and containment limits
 
@@ -223,12 +217,11 @@ unchanged.
   not exercise this handler. Forced termination or an unavailable modem cannot
   promise withdrawal.
 - No timer fabricates connectivity or bypasses protocol acknowledgements.
-- Keep heartbeat and lease values coherent when changing this policy. Exact
-  recovery still needs native qualification.
+- Keep heartbeat and lease values coherent when changing this policy.
 
 Startup reconciliation runs independently of observer delivery: discover and
 bind, register notifications, clear station availability and default profile0,
 then wait. Unknown Wi-Fi administrative state is preserved. No switch value or
 positive connectivity is sent until an authenticated observation arrives. The
-init restart floor and protocol renewal limits are separate; neither guarantees
-carrier registration.
+init restart floor and protocol renewal limits are separate, and neither
+guarantees carrier registration.
