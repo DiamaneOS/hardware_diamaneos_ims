@@ -20,7 +20,7 @@ carrier behavior: see [verification](docs/verification.md).
   - Its own UID's VPN/firewall block does not describe the modem bearer.
 - `wlan/`: bounded DSD protocol and acknowledgement state machine.
 - `wlan-runtime/`: isolated QRTR client and authenticated Binder snapshot adapter.
-- `wlan-observer/`: passive observation of the connected Wi-Fi link; no
+- `wlan-observer/`: passive observation of the connected Wi-Fi link, with no
   Internet, location or phone-state permission.
 - `integration/`: emergency-APN comparison tooling and source IWLAN provenance.
 - `imeiprov/`: one-shot [IMEI provisioning](docs/imei-provisioning.md)
