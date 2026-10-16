@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Shared observation lifetime logic; Android Binder adapter is in main.rs.
+// Shared observation lifetime logic. Android Binder adapter is in main.rs.
 #![forbid(unsafe_code)]
 use diamaneos_wlan_reporting::session::Observation;
 

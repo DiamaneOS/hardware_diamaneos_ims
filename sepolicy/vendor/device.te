@@ -3,6 +3,6 @@
 #
 # Block-device type for the Fairphone traceability partition, read only by the
 # IMEI provisioning tool (imeiprov.te). The device maps the partition path to
-# this type in its file_contexts; stock left it with the generic block_device
+# this type in its file_contexts. Stock left it with the generic block_device
 # label.
 type vendor_traceability_block_device, dev_type;

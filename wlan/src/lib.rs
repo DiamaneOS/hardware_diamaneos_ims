@@ -147,7 +147,7 @@ impl Connected {
         tlv(&mut body, 1, &self.bssid);
         if let Some(ip) = self.ipv4 {
             // Stock reverses in_addr before the IDL uint32 encoder. IPv4 is a
-            // little-endian numeric address on this interface; IPv6 is octets.
+            // little-endian numeric address on this interface. IPv6 is octets.
             tlv(
                 &mut body,
                 0x10,
@@ -188,7 +188,7 @@ impl Connected {
 
     /// Withdraw this particular previously reported network, preserving its real
     /// BSSID in the mandatory field. This does not encode an unknown cold-start
-    /// state; startup reconciliation remains an integration requirement.
+    /// state. Startup reconciliation remains an integration requirement.
     pub fn encode_withdrawal(&self, transaction: u16) -> Result<Vec<u8>, Error> {
         withdrawal(transaction, self.bssid)
     }
@@ -276,7 +276,7 @@ pub fn keepalive_operation_failed(transaction: u16) -> Result<Vec<u8>, Error> {
     request(transaction, NAT_KEEPALIVE_OPERATION_STATUS, body)
 }
 
-/// Stock's default connectivity profile only; not a signal/throughput measurement
+/// Stock's default connectivity profile only. Not a signal/throughput measurement
 /// and never a caller-selected profile. IDL: required uint32 profile, optional
 /// uint32 status (0 met, 1 not met). The stock default profile is always ID 0.
 pub fn default_profile_status(transaction: u16, connected_default: bool) -> Result<Vec<u8>, Error> {

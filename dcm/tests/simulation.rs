@@ -241,13 +241,13 @@ fn deactivation_notification_is_owner_scoped_and_preserves_shared_bearer() {
     assert_eq!(e.session_count(), 2);
     assert_eq!(e.report(request(&first), Some(network())).len(), 2);
     let out = e.receive(MODEM, &deactivate(id));
-    assert_eq!(out.len(), 2); // Response, terminal result; shared bearer remains requested.
+    assert_eq!(out.len(), 2); // Response, terminal result. Shared bearer remains requested.
     assert!(!out
         .iter()
         .any(|x| matches!(x, Effect::Release(_) | Effect::ReleaseAfter { .. })));
     assert_eq!(e.session_count(), 1);
     let up = e.report(request(&first), Some(network()));
-    assert!(up.is_empty()); // Survivor keeps its existing address; no redundant UP notice.
+    assert!(up.is_empty()); // Survivor keeps its existing address. No redundant UP notice.
     let mut changed = network();
     changed.v6 = Some("2001:db8::2".parse().unwrap());
     let up = e.report(request(&first), Some(changed));
@@ -610,7 +610,7 @@ fn publication_keeps_modem_requests_and_notices_but_not_local_datagrams() {
     };
     let competitor = Control::server(NEW_SERVER, Peer { node: 1, port: 901 }).encode();
     assert_eq!(lookup_input(local, control, &competitor), Lookup::Conflict);
-    // Only the local name service decides publication; the engine drops the rest.
+    // Only the local name service decides publication. The engine drops the rest.
     let remote_control = Peer {
         node: MODEM.node,
         port: CTRL_PORT,

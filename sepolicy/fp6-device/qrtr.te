@@ -3,13 +3,13 @@
 #
 # Reference inventory only: review against the device tree's sepolicy/telephony/qrtr.te (a
 # BOARD_VENDOR_SEPOLICY_DIRS entry). It names that tree's domains, so it
-# belongs with them; nothing adds this directory to the build.
+# belongs with them. Nothing adds this directory to the build.
 #
 # QRTR has no per-service access control: the kernel name service accepts a
 # NEW_SERVER from any local socket (net/qrtr/ns.c), and any socket can send
 # any QMI request to the modem. A domain that can open a QRTR socket can
 # therefore impersonate a modem-facing service or command the modem
-# Only the domains below may. The device owns the active inventory; this file
+# Only the domains below may. The device owns the active inventory. This file
 # is not included in the product. Adding a domain requires a new trust review.
 neverallow {
   domain

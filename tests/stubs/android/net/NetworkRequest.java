@@ -2,7 +2,7 @@
 // Host-only fixture for the broker simulations. Never part of an Android module.
 package android.net;
 
-/** Records what was requested; the simulations inspect it. */
+/** Records what was requested. The simulations inspect it. */
 public final class NetworkRequest {
     private final NetworkCapabilities capabilities;
 

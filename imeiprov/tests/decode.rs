@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The DiamaneOS Project
 //! Host tests for IMEI decode/validate/encode and the NV message codec.
-//! All values are synthetic (fake all-zero TACs with correct Luhn digits); no
+//! All values are synthetic (fake all-zero TACs with correct Luhn digits). No
 //! real identifier appears here or in any output.
 
 use diamaneos_imeiprov::imei::{check_pair, Imei, NV_ITEM_IMEI};
@@ -44,7 +44,7 @@ fn luhn_accepts_valid_and_rejects_bad_check_digit() {
 
 #[test]
 fn bcd_layout_matches_stock_imei_build() {
-    // A = ...d14=1, d15=8. byte1 low nibble = 0x0A identity; byte8 = (8<<4)|1.
+    // A = ...d14=1, d15=8. byte1 low nibble = 0x0A identity. byte8 = (8<<4)|1.
     let bcd = imei_a().to_nv550_bcd();
     assert_eq!(bcd, [0x08, 0x0A, 0, 0, 0, 0, 0, 0, 0x81]);
 }

@@ -64,12 +64,12 @@ pub struct Session {
 /// Fixed numeric diagnostics, with no observation or packet data.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Diagnostics {
-    /// Bind, clear, switch, status, settled-down, settled-up, failed, profile;
-    /// notification registration uses8.
+    /// Stages 0-7: bind, clear, switch, status, settled-down, settled-up,
+    /// failed, profile. Notification registration uses 8.
     pub stage: i32,
     pub operation: u16,
-    /// 0: no failure; positive: QMI error; -1: timeout; -2: transaction
-    /// exhaustion; -3: local encoding failure.
+    /// 0: no failure, positive: QMI error, -1: timeout, -2: transaction
+    /// exhaustion, -3: local encoding failure.
     pub error: i32,
 }
 
@@ -176,14 +176,14 @@ impl Session {
     }
 
     /// Retries preserve transaction and payload. Exhaustion requires a fresh
-    /// QRTR endpoint; this instance never wraps and reuses a transaction ID.
+    /// QRTR endpoint. This instance never wraps and reuses a transaction ID.
     pub fn poll(&mut self, now_ms: u64) -> Option<Vec<u8>> {
         self.poll_control(now_ms)
     }
 
     /// Bounded transport cycle. Send present packets in order: connectivity,
     /// keepalive failure, then unavailable quality. All deadline machines advance even when
-    /// control emits continuously; neither result is discarded or speculative.
+    /// control emits continuously. Neither result is discarded or speculative.
     pub fn poll_cycle(&mut self, now_ms: u64) -> [Option<Vec<u8>>; 3] {
         let control = self.poll_control(now_ms);
         let reply = if self.bound {
@@ -199,7 +199,7 @@ impl Session {
             None
         };
         // A final allocated connectivity packet must still be sent and tracked.
-        // Renew only after its ACK/retries drain; optional exhaustion cannot
+        // Renew only after its ACK/retries drain. Optional exhaustion cannot
         // discard an in-flight withdrawal or consume its transaction.
         let exhausted_keepalive = self.keepalive_failures.diagnostics().error == -2;
         let exhausted_profile = self.profile_report_diagnostics().error == -2;

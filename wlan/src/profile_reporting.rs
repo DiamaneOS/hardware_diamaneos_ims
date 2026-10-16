@@ -22,9 +22,9 @@ pub struct Diagnostics {
     pub sent: u64,
     pub acknowledged: u64,
     pub cancelled: u64,
-    /// Positive: QMI error; -1: timeout; -2: transaction exhaustion;
-    /// -3: malformed notice; -4: unmapped selection; -5: capacity;
-    /// -6: revision exhaustion; -7: local encoding failure.
+    /// Positive: QMI error, -1: timeout, -2: transaction exhaustion,
+    /// -3: malformed notice, -4: unmapped selection, -5: capacity,
+    /// -6: revision exhaustion, -7: local encoding failure.
     pub error: i32,
 }
 

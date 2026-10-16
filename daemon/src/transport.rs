@@ -11,7 +11,7 @@ pub enum Fault {
 }
 pub fn classify(error: &io::Error) -> Fault {
     match error.raw_os_error() {
-        // Buffer or memory exhaustion is momentary; the owner retries the same work.
+        // Buffer or memory exhaustion is momentary. The caller retries the same work.
         Some(libc::EAGAIN | libc::EINTR | libc::ENOBUFS | libc::ENOMEM) => Fault::Retry,
         Some(libc::EPIPE | libc::ENODEV | libc::ECONNRESET | libc::EHOSTUNREACH) => Fault::PeerGone,
         Some(libc::ENETRESET) => Fault::SocketReset,

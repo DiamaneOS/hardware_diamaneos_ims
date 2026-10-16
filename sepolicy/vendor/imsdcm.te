@@ -30,7 +30,7 @@ get_prop(diamaneos_imsdcm, vendor_diamaneos_imsdcm_prop)
 # Refuse operation when its caller-isolation policy is not enforced.
 allow diamaneos_imsdcm selinuxfs:file r_file_perms;
 
-# Read-only calendar lookup; no clock/timezone setter or location permission.
+# Read-only calendar lookup. No clock/timezone setter or location permission.
 get_prop(diamaneos_imsdcm, timezone_prop)
 # Platform domain policy already permits read-only system_zoneinfo_file access.
 

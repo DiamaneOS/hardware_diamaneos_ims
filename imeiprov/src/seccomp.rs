@@ -3,7 +3,7 @@
 //! Small arm64 seccomp allowlist for the one-shot provisioning tool, installed
 //! after the partition read and before any QRTR work. SELinux independently
 //! controls the opened paths and the reachable sockets. `socket(2)` is limited
-//! to QRTR and the local AF_UNIX log socket; everything unlisted returns ENOSYS.
+//! to QRTR and the local AF_UNIX log socket. Everything unlisted returns ENOSYS.
 
 use std::io;
 
@@ -124,7 +124,7 @@ pub fn install() -> io::Result<()> {
         len: f.len() as u16,
         filter: f.as_mut_ptr(),
     };
-    // SAFETY: the kernel copies this bounded BPF program synchronously; the
+    // SAFETY: the kernel copies this bounded BPF program synchronously. The
     // pointers stay live until prctl returns.
     if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
         return Err(io::Error::last_os_error());

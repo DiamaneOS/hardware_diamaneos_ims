@@ -9,13 +9,13 @@
      - One privileged permission, CONNECTIVITY_USE_RESTRICTED_NETWORKS, which
        ConnectivityService requires for the restricted IMS and EIMS requests.
        UID firewall/VPN status is not the physical modem bearer's status.
-       This broker files restricted requests and reports metadata; it never
+       This broker files restricted requests and reports metadata. It never
        opens IP/raw/modem sockets or forwards application traffic.
        No location or phone-state permission (getSubscriptionId needs none).
      - No components: nothing can bind to it, start it or send it intents.
      - persistent and directBootAware: running at boot, before the first
        unlock, as emergency IMS needs.
-     - Built with sdk_version "module_current"; Soong therefore sets
+     - Built with sdk_version "module_current". Soong therefore sets
        android:usesNonSdkApi (the module-lib ServiceManager calls it makes are
        outside the public SDK list).
 -->

@@ -61,7 +61,7 @@ impl<'a> Frame<'a> {
             id: u16::from_le_bytes([bytes[3], bytes[4]]),
             body: &bytes[7..],
         };
-        // Reject duplicate TLVs, including unknown optional ones; do not let parsers
+        // Reject duplicate TLVs, including unknown optional ones. Do not let parsers
         // disagree about first/last occurrence. Validate once before reading fields.
         let mut seen = [false; 256];
         let mut rest = frame.body;
@@ -288,7 +288,7 @@ pub fn indication(
 /// Unknown optional fields are ignored for forward compatibility. Unknown
 /// mandatory fields, duplicates and trailing bytes in known fields are rejected.
 pub fn validate_request(f: &Frame<'_>) -> Result<(), Error> {
-    // (tag, exact bytes; 0 means counted blob, 255 means link-address aggregate).
+    // (tag, exact bytes: 0 means counted blob, 255 means link-address aggregate).
     let fields: &[(u8, usize)] = match f.id {
         0x20 => &[(1, 254), (0x10, 4), (0x11, 4), (0x12, 4), (0x13, 4)],
         0x21 | 0x22 => &[(1, 1), (0x10, 4)],

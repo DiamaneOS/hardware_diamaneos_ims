@@ -11,11 +11,11 @@ app_domain(diamaneos_ims_broker_app)
 binder_use(diamaneos_ims_broker_app)
 
 # ConnectivityManager (connectivity) and the services every app process uses
-# are app_api_service; SubscriptionManager.getSubscriptionId() asks isub,
+# are app_api_service. SubscriptionManager.getSubscriptionId() asks isub,
 # which is radio_service.
 allow diamaneos_ims_broker_app { app_api_service radio_service }:service_manager find;
 
-# Own app data (device-protected storage; the app is directBootAware).
+# Own app data (device-protected storage, the app is directBootAware).
 allow diamaneos_ims_broker_app app_data_file:dir create_dir_perms;
 allow diamaneos_ims_broker_app app_data_file:{ file lnk_file } create_file_perms;
 

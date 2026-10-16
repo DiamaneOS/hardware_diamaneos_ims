@@ -39,7 +39,7 @@ const SESSION_RENEWAL_DELAY_MS: u64 = 30_000;
 const MAX_SESSION_RENEWALS: u8 = 3;
 const MAX_RECEIVED_PACKETS_PER_CYCLE: usize = 8;
 const REPORT_LOOP_PERIOD_MS: u64 = 250;
-// One 2-second protocol deadline plus scheduling margin; never block init exit
+// One 2-second protocol deadline plus scheduling margin. Never block init exit
 // indefinitely trying to reconcile unavailable modem state.
 const SHUTDOWN_WITHDRAWAL_BUDGET_MS: u64 = 2_500;
 const SHUTDOWN_POLL_PERIOD_MS: u64 = 50;
@@ -189,7 +189,7 @@ struct Client {
     failures: u8,
     last_observation: Option<Observation>,
     lookup_pending: bool,
-    // A replacement socket failed to bind; retry each cycle with this renewal count.
+    // A replacement socket failed to bind. Retry each cycle with this renewal count.
     rebind: Option<u8>,
 }
 impl Client {
@@ -406,7 +406,7 @@ fn run() -> io::Result<()> {
         .collect::<io::Result<Vec<_>>>()?;
     // Handler only stores an atomic flag. SIGTERM/SIGINT gets a bounded
     // withdrawal attempt. Default init restart uses SIGKILL, which cannot run
-    // this handler; abrupt loss and modem failure cannot promise withdrawal.
+    // this handler. Abrupt loss and modem failure cannot promise withdrawal.
     unsafe {
         libc::signal(libc::SIGTERM, stop as *const () as libc::sighandler_t);
         libc::signal(libc::SIGINT, stop as *const () as libc::sighandler_t);
@@ -419,7 +419,7 @@ fn run() -> io::Result<()> {
             .observations
             .current(now);
         // Reconcile startup modem state even before an observer is available.
-        // Session waits after clears; only authenticated observations can send
+        // Session waits after clears. Only authenticated observations can send
         // switch state or replay positive connectivity.
         for client in &mut clients {
             client.step(node, observation.as_ref(), now)?;

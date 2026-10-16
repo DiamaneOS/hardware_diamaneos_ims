@@ -84,7 +84,7 @@ impl Dispatch {
         }
     }
     /// Backpressure is not loss. End the stalled peer's sessions toward it and
-    /// queue its still-valid output again behind a fresh deadline; sessions are
+    /// queue its still-valid output again behind a fresh deadline. Sessions are
     /// dropped silently only once the peer has actually gone.
     fn stalled(
         &mut self,
@@ -172,7 +172,7 @@ impl Dispatch {
                             Ok(()) => (),
                             Err(error) => match classify(&error) {
                                 // There is no admitted session to retire or
-                                // lifetime to queue; caller may retry its request.
+                                // lifetime to queue. Caller may retry its request.
                                 Fault::Retry | Fault::PeerGone => {
                                     if exhausted(&error) {
                                         engine.transport_exhausted();
@@ -271,7 +271,7 @@ impl Dispatch {
             return Ok(());
         }
         // Match the bounded Binder-input quantum. A full valid response burst
-        // must not be limited to one packet per25ms; peers remain round-robin.
+        // must not be limited to one packet per 25 ms. Peers remain round-robin.
         const MAX_SUBMISSIONS_PER_CYCLE: usize = 32;
         for _ in 0..MAX_SUBMISSIONS_PER_CYCLE {
             if self.queue.peer_count() == 0 {

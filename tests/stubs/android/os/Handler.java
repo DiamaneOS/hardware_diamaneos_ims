@@ -6,7 +6,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 
-/** A looper the simulation runs by hand; delayed work runs only when asked. */
+/** A looper the simulation runs by hand. Delayed work runs only when asked. */
 public class Handler {
     private final ArrayDeque<Runnable> queue = new ArrayDeque<>();
     private final List<Delayed> delayed = new ArrayList<>();
@@ -42,7 +42,7 @@ public class Handler {
         delayed.removeIf(d -> d.work == work);
     }
 
-    /** Removes delayed work posted with {@code token}; null removes everything. */
+    /** Removes delayed work posted with {@code token}. Null removes everything. */
     public synchronized void removeCallbacksAndMessages(Object token) {
         if (token == null) {
             queue.clear();

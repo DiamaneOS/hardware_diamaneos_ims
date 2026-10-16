@@ -4,16 +4,16 @@
 //!
 //! Reverse-engineered from stock `tctd`:
 //! - service: QRTR service id 0x2ff, IDL v1 (`tct_get_service_object_internal_v01`
-//!   @0xfdfc; service object @0x13e30 = {lib 5, idl 1, service 0x2ff, max_msg 0x100e},
+//!   @0xfdfc. Service object @0x13e30 = {lib 5, idl 1, service 0x2ff, max_msg 0x100e},
 //!   message counts {4 requests, 4 responses, 1 indication}).
 //! - Message layouts come from the IDL message table @0x126b8 (encoded TLV
-//!   descriptors @0x688a; each element is tag, type, struct offset, and for
+//!   descriptors @0x688a. Each element is tag, type, struct offset, and for
 //!   arrays a fixed length). The service-table maximum lengths confirm them.
 //!   - NV read request (0x10): TLV 0x01 u32 item id.
 //!   - NV read response: TLV 0x01 u32 data length, TLV 0x02 u8 NV status,
-//!     TLV 0x03 u8[4096] data (fixed; max encoded 4110 bytes).
+//!     TLV 0x03 u8[4096] data (fixed, max encoded 4110 bytes).
 //!   - NV write request (0x30): TLV 0x01 u16 item id, TLV 0x02 u32 data length,
-//!     TLV 0x03 u8[512] data (fixed; max encoded 527 bytes). Stock `imei_build`
+//!     TLV 0x03 u8[512] data (fixed, max encoded 527 bytes). Stock `imei_build`
 //!     @0xb618 fills the data with the 9-byte NV 550 value followed by the
 //!     subscription index, data length 10.
 //!   - NV write response: TLV 0x01 u32, TLV 0x02 u8 NV status, TLV 0x03 u8[512].

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The DiamaneOS Project
-//! Linux UAPI QRTR control packets, little-endian; no socket operations.
+//! Linux UAPI QRTR control packets, little-endian. No socket operations.
 use crate::engine::Peer;
 pub const SERVICE: u32 = 0x302;
 pub const INSTANCE: u32 = 1; // IDL major 1, instance zero.
@@ -85,7 +85,7 @@ impl Control {
     pub fn conflicts_with(self, local: Peer) -> bool {
         self.conflicting_server() && self.words[2] == local.node && self.words[3] != local.port
     }
-    /// A record on another node cannot take the local reserved role; it is
+    /// A record on another node cannot take the local reserved role. It is
     /// counted, not treated as a conflict.
     pub fn remote_server(self, local: Peer) -> bool {
         self.conflicting_server() && self.words[2] != local.node

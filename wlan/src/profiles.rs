@@ -79,7 +79,7 @@ impl Registry {
         })
     }
     /// Call only after endpoint/version/generation and subscription binding checks.
-    /// Retains only normalized identity/lifetime; never SIM bytes or thresholds.
+    /// Retains only normalized identity/lifetime. Never SIM bytes or thresholds.
     pub fn receive(&mut self, packet: &[u8]) -> Result<Change, Error> {
         let notice = Notice::parse(packet).ok_or(Error::Malformed)?;
         let frame = Frame::parse(packet).map_err(|_| Error::Malformed)?;
@@ -107,7 +107,7 @@ impl Registry {
             }
             Notice::Selected(selection) => {
                 // Unknown bits may imply an unsupported lifecycle. Reject before
-                // mutation; a runtime must stop this optional channel on this error.
+                // mutation. A runtime must stop this optional channel on this error.
                 if selection.has_unmapped_bits() {
                     return Err(Error::UnmappedSelection);
                 }

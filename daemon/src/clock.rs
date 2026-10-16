@@ -35,7 +35,7 @@ fn at(seconds: u64) -> io::Result<Sample> {
         let mut utc = utc.assume_init();
         // Match the verified modem ABI: local fields include DST, but the zone
         // is the standard (non-DST) offset west of UTC, in 15-minute units.
-        // gmtime_r supplies tm_isdst=0; mktime interprets that as local standard time.
+        // gmtime_r supplies tm_isdst=0. mktime interprets that as local standard time.
         let interpreted = libc::mktime(&mut utc);
         if interpreted == -1 {
             return Err(io::Error::other("timezone conversion failed"));

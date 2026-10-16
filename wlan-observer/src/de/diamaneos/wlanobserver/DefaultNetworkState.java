@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package de.diamaneos.wlanobserver;
 
-/** Handler-confined metadata only; never grants network access or changes routes. */
+/** Handler-confined metadata only. Never grants network access or changes routes. */
 final class DefaultNetworkState<N> {
     private N network;
     private boolean wifi;

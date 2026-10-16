@@ -20,7 +20,7 @@ const NORMAL_CAP: usize = MAX_SESSIONS - 8;
 /// One activation request as the modem sends it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Act {
-    /// TLV 0x12, one-based; None omits it (the no-subscription fallback).
+    /// TLV 0x12, one-based. None omits it (the no-subscription fallback).
     slot: Option<u32>,
     emergency: bool,
     family: u32,
@@ -348,7 +348,7 @@ fn reapplying_the_default_every_loop_pass_never_disturbs_a_pending_or_live_emerg
             address: v4(&n)
         }]
     );
-    // The daemon calls this on every pass; the engine has no timer of its own,
+    // The daemon calls this on every pass. The engine has no timer of its own,
     // so a pending emergency request waits as long as the modem waits.
     for _ in 0..10_000 {
         assert!(s.e.set_emergency_enabled(true).is_empty());
@@ -565,7 +565,7 @@ fn emergency_requested_while_the_broker_restarts_is_filed_when_it_returns() {
     let mut s = Sim::new();
     assert!(s.e.broker_lost().is_empty());
     let out = s.activate(MODEM, eims(1));
-    assert_eq!(out.len(), 1); // Acknowledged and held; no one to ask yet.
+    assert_eq!(out.len(), 1); // Acknowledged and held. No one to ask yet.
     let pdp = accepted(&out);
     // With no broker registered, no report can bring it up, whatever its serial.
     for serial in 1..=4 {

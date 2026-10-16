@@ -38,7 +38,7 @@ pub struct Diagnostics {
     pub sent: u64,
     pub acknowledged: u64,
     pub dropped: u64,
-    /// 0: no error; positive: QMI error; -1: timeout; -2: transaction exhaustion;
+    /// 0: no error, positive: QMI error, -1: timeout, -2: transaction exhaustion,
     /// -4: a valid instruction was discarded because the bounded queue was full.
     pub error: i32,
 }
@@ -57,7 +57,7 @@ impl Failures {
     }
 
     // Only called after runtime peer validation and successful subscription bind.
-    // A queue entry contains no instruction fields; each accepted entry gets the
+    // A queue entry contains no instruction fields. Each accepted entry gets the
     // same truthful failure status, for start and stop alike.
     pub(crate) fn receive(&mut self, bytes: &[u8]) -> bool {
         if keepalive_instruction(bytes) {
@@ -65,7 +65,7 @@ impl Failures {
                 self.queued += 1;
             } else {
                 self.diagnostics.dropped = self.diagnostics.dropped.saturating_add(1);
-                // Preserve an existing terminal error; overflow is a sticky
+                // Preserve an existing terminal error. Overflow is a sticky
                 // degradation indication until this modem context is replaced.
                 if !self.blocked && self.diagnostics.error == 0 {
                     self.diagnostics.error = -4;

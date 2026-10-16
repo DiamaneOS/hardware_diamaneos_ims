@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The DiamaneOS Project
-//! Bounded per-peer FIFO ownership. The engine supplies and revalidates tokens;
-//! this queue never interprets or logs payloads and never silently loses tokens.
+//! Bounded per-peer FIFO ownership. The engine supplies and revalidates tokens.
+//! This queue never interprets or logs payloads and never silently loses tokens.
 use diamaneos_ims_dcm::{
     engine::{Peer, MAX_SESSIONS},
     protocol::MAX_DATAGRAM,
@@ -43,7 +43,7 @@ pub enum Finished<T> {
     Obsolete(T),
     PeerLost(Peer, Vec<T>),
     /// The peer's head stayed backpressured past its deadline. The peer may
-    /// still be alive; the caller decides what to keep.
+    /// still be alive. The caller decides what to keep.
     Expired(Peer, Vec<T>),
 }
 
@@ -110,7 +110,7 @@ impl<T> Outbox<T> {
     }
 
     /// One fair head per call. Backpressure retains the exact head and original
-    /// deadline; it cannot reorder this peer or starve the next peer's turn.
+    /// deadline. It cannot reorder this peer or starve the next peer's turn.
     pub fn attempt(
         &mut self,
         now_ms: u64,
