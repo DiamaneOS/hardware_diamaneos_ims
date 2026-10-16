@@ -3,9 +3,10 @@
 `imeiprovd` is a minimal, source-built, one-shot tool that gives the modem its
 IMEIs. DiamaneOS does not ship Fairphone's closed traceability daemon, so the
 modem would otherwise report Qualcomm's placeholder IMEI on both slots.
-`imeiprovd` does only that daemon's modem-NV part. It writes no Bluetooth or
-Wi-Fi MAC files, writes nothing to persist and leaves the region code alone.
-`--write` sets one status property (below).
+`imeiprovd` does only three of that daemon's jobs: the modem-NV part and, in
+separate modes, the factory Bluetooth address and Wi-Fi MAC (see below). It
+writes nothing to persist and leaves the region code alone. `--write` sets one
+status property (below).
 
 ## What it does
 
@@ -38,6 +39,10 @@ other identifier.
   - A failed write or read-back is logged and the tool exits non-zero. It does
     not retry until the next boot.
   - Sets `vendor.diamaneos.imei.status` ([below](#status-and-slot-order)).
+- `--bt-address`: the factory Bluetooth address, run once per boot by
+  `imeiprovd.rc` as its own service (below). Touches no IMEI and no modem.
+- `--wlan-mac`: the factory Wi-Fi MAC, run once per boot by `imeiprovd.rc` as
+  its own service (below). Touches no IMEI and no modem.
 
 Why `--write` runs at every boot: activating a slot (`fastboot --set-active`,
 and every OTA) makes the bootloader restore the modem file system from its
@@ -84,23 +89,90 @@ boot until one:
   neither shows it.
 - Nothing restarts the phone without the user.
 
+## Bluetooth address (`--bt-address`)
+
+Without the closed daemon, Qualcomm's HCI implementation finds no address and
+generates one: the prefix 22:22 plus four bytes from `rand()`, stored in
+`persist.vendor.service.bdroid.bdaddr`, which marks a DiamaneOS phone. The
+factory address is in the traceability partition, so `vendor.imeiprovd-bt`
+(started at `post-fs`):
+
+1. Reads the 6 bytes at offset `0x33` (right after the slot 1 IMEI), read-only.
+   They are stored least significant byte first. Stock prints them in reverse
+   as `xx:xx:xx:xx:xx:xx` (`tctd` @0xb3cc).
+2. Validates them. Stock checks nothing, but `imeiprovd` rejects all-zero and
+   all-`0xff` values, group (multicast) and locally administered addresses
+   (which includes the generated 22:22 prefix), and the Bluetooth inquiry
+   LAPs `0x9E8B00`-`0x9E8B3F`, which no device address may use.
+3. Sets `ro.vendor.diamaneos.bt.factory_address` (lowercase, colon-separated,
+   as stock). The device's Bluetooth init rc copies it to
+   `ro.vendor.bt.boot.macaddr`, as stock's `tctd.rc` does. The HCI
+   implementation reads that before falling back to its stored or a newly
+   generated address.
+
+It logs `bt address: set`, `bt address: missing` (read failed),
+`bt address: invalid` or `bt address: property not set`, never the address.
+If the address is missing or invalid nothing is set, and Bluetooth keeps the
+address it used before.
+
+## Wi-Fi MAC (`--wlan-mac`)
+
+Without the closed daemon, nothing writes the WLAN driver's MAC file, so the
+QCA6750 driver uses its firmware's generic Qualcomm address (prefix 00:03:7f)
+instead of the factory MAC. Stock: `tctd` sets `ro.vendor.trace.wifimac` and
+`setwlanmac.sh`, a late_start script, copies it to
+`/mnt/vendor/persist/qca6750/wlan_mac.bin`, which a `/vendor/firmware` link
+exposes to the driver, so a new or changed MAC takes effect only from the next
+boot. `vendor.imeiprovd-wlan` (init waits for it at `post-fs`):
+
+1. Reads the 6 bytes at offset `0x39` (right after the Bluetooth address),
+   read-only, stored least significant byte first, as for the address.
+2. Validates them: not all zero, not all `0xff` (broadcast), not a group
+   (multicast) and not a locally administered address. Stock checks nothing.
+3. Creates `/mnt/vendor/wlan_mac/wlan/qca_cld/qca6750/wlan_mac.bin` (tmpfs,
+   new file, mode 0400, no link followed) with stock's 33 bytes:
+   `Intf0MacAddress=<12 lowercase hex digits>`, a newline, `END`, a newline.
+
+The driver asks for `wlan/qca_cld/qca6750/wlan_mac.bin` when it probes, after
+early-boot starts the Wi-Fi processor. Its configuration has
+`read_mac_addr_from_mac_file=1` (as stock). The kernel finds no such file on
+its own path, ueventd finds it in `/mnt/vendor/wlan_mac/` (a firmware directory
+in the device's `ueventd.rc`), and the driver takes `Intf0` as the station's
+hardware address and generates the others (P2P and so on). Android randomises
+the address per network on top of it.
+
+It logs `wlan mac: written`, `wlan mac: missing` (read failed), `wlan mac:
+invalid` or `wlan mac: file not written: <error kind>`, never the MAC. If the
+MAC is missing or invalid no file is written and the driver uses its firmware's
+address.
+
 ## Privileges
 
 - Own vendor user/group `vendor_imeiprov` (UID/GID 2994, `config.fs`), with no
   supplementary groups and no capabilities.
 - SELinux domain `diamaneos_imeiprov`, allowed only a QRTR socket, read-only
   access to the traceability block device (`vendor_traceability_block_device`),
-  the SELinux enforce flag it checks before running, and setting
-  `vendor.diamaneos.imei.status` (vendor restricted,
-  `vendor_diamaneos_imei_status_prop`).
+  the SELinux enforce flag it checks before running, setting
+  `ro.vendor.diamaneos.bt.factory_address` (its own vendor-internal type,
+  `vendor_diamaneos_bt_address_prop`) and `vendor.diamaneos.imei.status`
+  (vendor restricted, `vendor_diamaneos_imei_status_prop`), and creating and
+  writing the Wi-Fi MAC file (`vendor_diamaneos_wlan_mac_file`, which also
+  labels its directories).
 - Only imeiprovd, init and vendor_init may set the status. Besides imeiprovd,
   only the phone process (`radio`), init, vendor_init and dumpstate may read
   it.
 - `neverallow` rules forbid capabilities, any non-QRTR socket, writing any
-  block device, setting any other property, and Binder.
+  block device, setting any other property, adding names to any other
+  directory, reading the MAC file back, and Binder.
+- Others keep every domain except init and vendor_init from setting the
+  address property or writing the MAC file, every domain except init,
+  vendor_init (the copy) and dumpstate from reading the property, and (in the
+  device policy) every domain except ueventd, init and vendor_init from
+  reading the MAC file.
 - An arm64 seccomp allowlist is installed before any modem communication, and
   `socket(2)` is limited to QRTR and local sockets (logd and the property
-  service).
+  service). `--bt-address` and `--wlan-mac` install none: each reads 6 bytes,
+  makes one property call or writes one file, and exits.
 - Refuses to run unless SELinux is enforcing.
 
 ## Protocol
@@ -124,7 +196,8 @@ boot until one:
 ## Tests
 
 All run with the host tests (`./tests/run-host-tests.sh`), with synthetic
-values only: IMEIs with fake all-zero TACs and correct Luhn digits.
+values only: IMEIs with fake all-zero TACs and correct Luhn digits, addresses
+from the RFC 7042 documentation range.
 
 - `imeiprov/tests/decode.rs`: decoding, Luhn validation, the NV 550 BCD codec
   (round trip and exact bytes), pair validation and the NV message build/parse
@@ -132,6 +205,10 @@ values only: IMEIs with fake all-zero TACs and correct Luhn digits.
 - `imeiprov/tests/provision.rs`: the `--write` run with a fake modem, including
   a failed slot 2 write that the next boot writes again, failed reads and the
   reported status.
+- `imeiprov/tests/bdaddr.rs`: the Bluetooth address byte order, property
+  format, validation and redaction.
+- `imeiprov/tests/wlanmac.rs`: the Wi-Fi MAC's byte order, the exact MAC file
+  (read back with a copy of the driver's parser), validation and redaction.
 
 ## Checking on a phone
 
@@ -148,3 +225,8 @@ values only: IMEIs with fake all-zero TACs and correct Luhn digits.
 
 A failed read logs `read_ok=false reason=...` with the error kind or NV status
 only.
+
+For the Bluetooth address, the log shows `bt address: set`. For the Wi-Fi MAC,
+it shows `wlan mac: written`, and the kernel log in a bug report shows
+ueventd's `found /mnt/vendor/wlan_mac/wlan/qca_cld/qca6750/wlan_mac.bin` and
+the driver's `using MAC address from wlan_mac.bin`.

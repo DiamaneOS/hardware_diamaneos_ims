@@ -29,6 +29,8 @@ carrier behavior: see [verification](docs/verification.md).
     the Fairphone TCL QMI service.
   - Reports in a property whether this boot wrote them, so the phone can offer
     a restart after a clean install.
+  - In other modes, sets the factory Bluetooth address property and writes the
+    WLAN driver's factory MAC file.
 
 ## Wi-Fi calling
 
