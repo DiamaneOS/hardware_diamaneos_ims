@@ -29,6 +29,38 @@ impl Written {
     }
 }
 
+/// The `--write` outcome, published as `vendor.diamaneos.imei.status`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Status {
+    Running,
+    /// The modem started without the IMEIs and took them now. Until the phone
+    /// restarts it pairs them with the SIM slots the other way round.
+    Written,
+    Unchanged,
+    Failed,
+}
+
+impl Status {
+    pub fn of(before: Option<Imei>, slot1: &Imei, written: &Written) -> Self {
+        if !written.ok() {
+            Status::Failed
+        } else if before == Some(*slot1) {
+            Status::Unchanged
+        } else {
+            Status::Written
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Status::Running => "running",
+            Status::Written => "written",
+            Status::Unchanged => "unchanged",
+            Status::Failed => "failed",
+        }
+    }
+}
+
 /// Reads NV 550, then, only if that read worked, writes both subscriptions
 /// and reads subscription 0 back. Returns the first read and what was written.
 ///

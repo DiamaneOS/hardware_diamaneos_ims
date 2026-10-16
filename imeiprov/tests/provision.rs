@@ -4,7 +4,7 @@
 //! (fake all-zero TACs with correct Luhn digits).
 
 use diamaneos_imeiprov::imei::Imei;
-use diamaneos_imeiprov::provision::{write_run, Modem};
+use diamaneos_imeiprov::provision::{write_run, Modem, Status};
 
 fn slot1() -> Imei {
     Imei::from_ascii(b"000000000000018").unwrap()
@@ -83,4 +83,30 @@ fn read_failures_fail_the_run() {
     let (_, written) = write_run(&mut no_read_back, &slot1(), &slot2()).unwrap();
     assert!(written.sub0_ok && written.sub1_ok && !written.verify_slot1);
     assert!(!written.ok());
+}
+
+#[test]
+fn status_is_written_only_when_the_modem_started_without_the_imeis() {
+    let mut modem = FakeModem::default();
+    let status = |modem: &mut FakeModem| {
+        let (before, written) = write_run(modem, &slot1(), &slot2()).unwrap();
+        Status::of(before, &slot1(), &written)
+    };
+    assert_eq!(status(&mut modem), Status::Written);
+    assert_eq!(status(&mut modem), Status::Unchanged);
+    modem.failing_sub = Some(1);
+    assert_eq!(status(&mut modem), Status::Failed);
+}
+
+#[test]
+fn every_status_is_in_the_property_enum() {
+    let contexts = include_str!("../../sepolicy/vendor/property_contexts");
+    let line = contexts
+        .lines()
+        .find(|l| l.starts_with("vendor.diamaneos.imei.status "))
+        .unwrap();
+    let values: Vec<&str> = line.split_whitespace().skip(4).collect();
+    for status in [Status::Running, Status::Written, Status::Unchanged, Status::Failed] {
+        assert!(values.contains(&status.as_str()));
+    }
 }
