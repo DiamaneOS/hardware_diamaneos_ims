@@ -149,9 +149,8 @@ address.
   reading the MAC file.
 - An arm64 seccomp allowlist is installed before any modem communication, and
   `socket(2)` is limited to QRTR and local sockets (logd and the property
-  service). `--bt-address` and
-  `--wlan-mac` install none: each reads 6 bytes, makes one property call or
-  writes one file, and exits.
+  service). `--bt-address` and `--wlan-mac` install none: each reads 6 bytes,
+  makes one property call or writes one file, and exits.
 - Refuses to run unless SELinux is enforcing.
 
 ## Protocol
