@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The DiamaneOS Project
+#
+# ro.vendor.diamaneos.ims.emergency_pdn: the build's emergency policy, set in
+#   PRODUCT_VENDOR_PROPERTIES. "serve" answers the modem's emergency PDN
+#   requests like stock. "refuse" (and an absent or unknown value) refuses
+#   them. ims-product.mk selects "serve", so emergency data is not silently
+#   disabled.
+# vendor.diamaneos.ims.emergency_pdn_kill: kill switch. 1 makes the
+#   daemon refuse emergency PDN requests whatever the build policy says. It
+#   works only on debuggable builds and resets at every boot.
+# vendor.diamaneos.ims.dcm_kill: kill switch. 1 stops the daemon
+#   (imsdcmd.rc), so no DCM service is published to the modem at all.
+ro.vendor.diamaneos.ims.emergency_pdn             u:object_r:vendor_diamaneos_imsdcm_prop:s0 exact enum refuse serve
+vendor.diamaneos.ims.emergency_pdn_kill   u:object_r:vendor_diamaneos_imsdcm_prop:s0 exact enum 0 1
+vendor.diamaneos.ims.dcm_kill             u:object_r:vendor_diamaneos_imsdcm_prop:s0 exact enum 0 1
+
+ro.vendor.diamaneos.ims.modem_node u:object_r:vendor_diamaneos_imsdcm_prop:s0 exact uint
+ro.vendor.diamaneos.ims.slots u:object_r:vendor_diamaneos_imsdcm_prop:s0 exact uint

@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+# Platform lifecycle gate. User builds always start the selected service. The
+# kill controls work only on debuggable builds and reset at every boot.
+on property:ro.persistent_properties.ready=true
+    start vendor.imsdcmd
+
+on property:ro.debuggable=1 && property:vendor.diamaneos.ims.dcm_kill=1
+    stop vendor.imsdcmd
+
+on property:ro.debuggable=1 && property:vendor.diamaneos.ims.dcm_kill=0
+    start vendor.imsdcmd

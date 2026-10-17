@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The DiamaneOS Project
+#
+# IMS DCM daemon: serves the modem's QMI IMS DCM service and asks the IMS
+# network broker for the IMS and emergency networks.
+#
+# - Own vendor user and group (config.fs), no supplementary groups, no
+#   capabilities (an empty capabilities list drops them all for a non-root
+#   user).
+# - Not critical: a crash must never reboot the phone. init restarts it.
+# - disabled, and no "interface aidl" line: only the triggers below start it,
+#   so servicemanager cannot start it past the kill switch when the broker
+#   waits for its service.
+service vendor.imsdcmd /vendor/bin/imsdcmd
+    class main
+    user vendor_imsdcm
+    group vendor_imsdcm
+    capabilities
+    disabled
+    # Keep Android init's ordinary restart floor. No one-second crash loop.
+
+# Startup and kill-switch actions live in imsdcmd-control.rc on system_ext.
+# The persistent-properties-ready gate is platform-private and cannot be a
+# vendor init trigger. Keep this service non-lazy so lookup cannot bypass it.

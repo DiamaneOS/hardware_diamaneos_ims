@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     SPDX-License-Identifier: Apache-2.0
+     Copyright 2026 The DiamaneOS Project
+
+     IMS network broker: files the IMS and emergency (EIMS) cellular network
+     requests the vendor IMS DCM daemon asks for.
+
+     - One privileged permission, CONNECTIVITY_USE_RESTRICTED_NETWORKS, which
+       ConnectivityService requires for the restricted IMS and EIMS requests.
+       UID firewall/VPN status is not the physical modem bearer's status.
+       This broker files restricted requests and reports metadata. It never
+       opens IP/raw/modem sockets or forwards application traffic.
+       No location or phone-state permission (getSubscriptionId needs none).
+     - No components: nothing can bind to it, start it or send it intents.
+     - persistent and directBootAware: running at boot, before the first
+       unlock, as emergency IMS needs.
+     - Built with sdk_version "module_current". Soong therefore sets
+       android:usesNonSdkApi (the module-lib ServiceManager calls it makes are
+       outside the public SDK list).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="de.diamaneos.imsbroker">
+
+    <uses-permission android:name="android.permission.CONNECTIVITY_USE_RESTRICTED_NETWORKS" />
+
+    <application
+        android:name=".ImsBrokerApp"
+        android:label="@string/app_name"
+        android:persistent="true"
+        android:directBootAware="true"
+        android:defaultToDeviceProtectedStorage="true"
+        android:allowBackup="false">
+        <!-- These network callbacks do not use physical sensors. This opts out
+             of DiamaneOS's implicit compatibility request, not explicit grants. -->
+        <meta-data android:name="de.diamaneos.permission.NO_IMPLICIT_OTHER_SENSORS"
+            android:value="true" />
+    </application>
+</manifest>

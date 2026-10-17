@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The DiamaneOS Project
+#
+# Reference inventory only: review against the device tree's sepolicy/telephony/qrtr.te (a
+# BOARD_VENDOR_SEPOLICY_DIRS entry). It names that tree's domains, so it
+# belongs with them. Nothing adds this directory to the build.
+#
+# QRTR has no per-service access control: the kernel name service accepts a
+# NEW_SERVER from any local socket (net/qrtr/ns.c), and any socket can send
+# any QMI request to the modem. A domain that can open a QRTR socket can
+# therefore impersonate a modem-facing service or command the modem
+# Only the domains below may. The device owns the active inventory. This file
+# is not included in the product. Adding a domain requires a new trust review.
+neverallow {
+  domain
+  -diamaneos_imsdcm
+  -diamaneos_wlan_reporter
+  -fp6_iwlan_app
+  -hal_audio_default
+  -hal_camera_default
+  -hal_graphics_composer_default
+  -hal_sensors_default
+  -kernel
+  -rild
+  -vendor_hal_gnss_qti
+  -vendor_nicmd
+  -vendor_pd_mapper
+  -vendor_per_mgr
+  -vendor_qrtr
+  -vendor_rfs_access
+  -vendor_rmt_storage
+  -vendor_thermal-engine
+  userdebug_or_eng(`-su')
+} self:qipcrtr_socket create;

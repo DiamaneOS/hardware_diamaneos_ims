@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The DiamaneOS Project
+
+package {
+    default_applicable_licenses: ["diamaneos_ims_license"],
+}
+
+// The one interface between the vendor IMS DCM daemon (Rust, server of
+// IImsDcm/default) and the system_ext broker app (Java, client, implements
+// IPdnBroker). VINTF-stable because it crosses the system/vendor boundary.
+//
+// V1 is frozen. Keep its API dump/hash immutable. Additive changes must use
+// the platform update-api/freeze-api flow and a new version.
+
+aidl_interface {
+    name: "vendor.diamaneos.hardware.imsdcm",
+    owner: "diamaneos",
+    vendor_available: true,
+    srcs: ["vendor/diamaneos/hardware/imsdcm/*.aidl"],
+    stability: "vintf",
+    frozen: true,
+    versions_with_info: [{ version: "1", imports: [] }],
+    backend: {
+        cpp: {
+            enabled: false,
+        },
+        ndk: {
+            enabled: false,
+        },
+        java: {
+            // Generated stubs call Binder.markVintfStability(), a system API.
+            sdk_version: "system_current",
+        },
+        rust: {
+            enabled: true,
+        },
+    },
+}

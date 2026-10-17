@@ -1,0 +1,503 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The DiamaneOS Project
+//! Android adapter. The pure state machine and wire codec live in dcm/.
+use binder::{
+    BinderFeatures, DeathRecipient, ExceptionCode, IBinder, Interface, ProcessState, Status,
+    Strong, ThreadState,
+};
+use diamaneos_ims_dcm::{
+    engine::{Diagnostics, Engine, Key, Network, Request},
+    protocol::PdnType as Kind,
+    qrtr::*,
+};
+use diamaneos_ims_runtime::{
+    socket::{Publication, Qrtr},
+    transport::{classify, exhausted, Fault},
+};
+mod android_dispatch;
+use android_dispatch::{Broker, Dispatch};
+use std::{
+    ffi::CStr,
+    io,
+    net::{Ipv4Addr, Ipv6Addr},
+    sync::{
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+        mpsc::{sync_channel, SyncSender, TryRecvError, TrySendError},
+        Arc, Mutex,
+    },
+    time::{Duration, Instant},
+};
+use vendor_diamaneos_hardware_imsdcm::aidl::vendor::diamaneos::hardware::imsdcm::{
+    IImsDcm::{BnImsDcm, IImsDcm},
+    IPdnBroker::IPdnBroker,
+    PdnFailure::PdnFailure,
+    PdnInfo::PdnInfo,
+    PdnRequest::PdnRequest,
+    PdnType::PdnType,
+};
+
+const SERVICE: &str = "vendor.diamaneos.hardware.imsdcm.IImsDcm/default";
+// Nonpersistent kill switches, honored only on debuggable builds.
+const DCM_KILL: &str = "vendor.diamaneos.ims.dcm_kill";
+const EMERGENCY_PDN_KILL: &str = "vendor.diamaneos.ims.emergency_pdn_kill";
+static STOP: AtomicBool = AtomicBool::new(false);
+extern "C" fn stop(_: libc::c_int) {
+    STOP.store(true, Ordering::Relaxed);
+}
+enum Event {
+    Register(u64, Strong<dyn IPdnBroker>, DeathRecipient),
+    Lost(u64),
+    Report(u64, Request, Option<Network>),
+    // The broker no longer holds the request, unlike a down report.
+    Failed(u64, Request),
+}
+struct Service {
+    sender: SyncSender<Event>,
+    epoch: Arc<AtomicU64>,
+    queue_waits: Arc<AtomicU64>,
+    broker_uid: AtomicU32,
+    diagnostics: Arc<Mutex<Diagnostics>>,
+    debug_controls: bool,
+}
+impl Interface for Service {
+    fn dump(&self, writer: &mut dyn io::Write, args: &[&CStr]) -> Result<(), binder::StatusCode> {
+        // Existing Binder dump transaction, no new endpoint or modem operation.
+        if ThreadState::get_calling_uid() != 0 {
+            return Err(binder::StatusCode::PERMISSION_DENIED);
+        }
+        if !args.is_empty() {
+            return Err(binder::StatusCode::BAD_VALUE);
+        }
+        // Never hold the state lock while writing a caller-provided descriptor.
+        let snapshot = *self
+            .diagnostics
+            .lock()
+            .map_err(|_| binder::StatusCode::FAILED_TRANSACTION)?;
+        let waits = self.queue_waits.load(Ordering::Relaxed);
+        // Current switch properties. None where the build does not honor them.
+        let switch = |name| {
+            self.debug_controls
+                .then(|| prop(name).as_deref() == Some("1"))
+        };
+        let (dcm_kill, emergency_pdn_kill) = (switch(DCM_KILL), switch(EMERGENCY_PDN_KILL));
+        writeln!(writer, "{snapshot:?}")
+            .and_then(|()| {
+                writeln!(
+                    writer,
+                    "Runtime {{ binder_queue_waits: {waits}, dcm_kill: {dcm_kill:?}, \
+                     emergency_pdn_kill: {emergency_pdn_kill:?} }}"
+                )
+            })
+            .map_err(|_| binder::StatusCode::FAILED_TRANSACTION)
+    }
+}
+fn denied() -> Status {
+    Status::new_exception(ExceptionCode::SECURITY, None)
+}
+fn app_uid() -> Option<u32> {
+    let uid = ThreadState::get_calling_uid();
+    (10000..20000).contains(&uid).then_some(uid)
+}
+
+fn key(r: &PdnRequest) -> binder::Result<Request> {
+    let kind = match r.r#type {
+        PdnType::IMS => Kind::Ims,
+        PdnType::EMERGENCY => Kind::Emergency,
+        _ => return Err(Status::new_exception(ExceptionCode::ILLEGAL_ARGUMENT, None)),
+    };
+    if !(-1..=2).contains(&r.slot) || r.serial <= 0 {
+        return Err(Status::new_exception(ExceptionCode::ILLEGAL_ARGUMENT, None));
+    }
+    Ok(Request {
+        key: Key { slot: r.slot, kind },
+        serial: r.serial,
+    })
+}
+/// A full queue blocks the calling Binder thread until the main loop drains it.
+/// Oneway reports and death notices then wait in the kernel instead of being
+/// lost. The main loop never waits for these threads, so this cannot deadlock.
+fn deliver(sender: &SyncSender<Event>, waits: &AtomicU64, e: Event) -> bool {
+    match sender.try_send(e) {
+        Ok(()) => true,
+        Err(TrySendError::Full(e)) => {
+            waits.fetch_add(1, Ordering::Relaxed);
+            sender.send(e).is_ok()
+        }
+        Err(TrySendError::Disconnected(_)) => false,
+    }
+}
+impl Service {
+    fn enqueue(&self, e: Event) -> binder::Result<()> {
+        if !deliver(&self.sender, &self.queue_waits, e) {
+            return Err(Status::new_exception(ExceptionCode::ILLEGAL_STATE, None));
+        }
+        Ok(())
+    }
+}
+impl IImsDcm for Service {
+    fn setBroker(&self, broker: &Strong<dyn IPdnBroker>) -> binder::Result<()> {
+        let uid = app_uid().ok_or_else(denied)?;
+        if let Err(old) =
+            self.broker_uid
+                .compare_exchange(0, uid, Ordering::AcqRel, Ordering::Acquire)
+        {
+            if old != uid {
+                return Err(denied());
+            }
+        }
+        // Only one authorized application domain can register. Every registration
+        // gets an epoch, so a delayed death callback cannot disconnect its successor.
+        let epoch = self.epoch.fetch_add(1, Ordering::AcqRel) + 1;
+        let sender = self.sender.clone();
+        let waits = self.queue_waits.clone();
+        let mut death = DeathRecipient::new(move || {
+            deliver(&sender, &waits, Event::Lost(epoch));
+        });
+        broker.as_binder().link_to_death(&mut death)?;
+        self.enqueue(Event::Register(epoch, broker.clone(), death))
+    }
+    fn onPdnUp(&self, r: &PdnRequest, i: &PdnInfo) -> binder::Result<()> {
+        if app_uid() != Some(self.broker_uid.load(Ordering::Acquire)) {
+            return Err(denied());
+        }
+        let r = key(r)?;
+        let v4 = match i.ipv4Address.as_slice() {
+            [] => None,
+            b if b.len() == 4 => Some(Ipv4Addr::from(<[u8; 4]>::try_from(b).unwrap())),
+            _ => return Err(Status::new_exception(ExceptionCode::ILLEGAL_ARGUMENT, None)),
+        };
+        let v6 = match i.ipv6Address.as_slice() {
+            [] => None,
+            b if b.len() == 16 => Some(Ipv6Addr::from(<[u8; 16]>::try_from(b).unwrap())),
+            _ => return Err(Status::new_exception(ExceptionCode::ILLEGAL_ARGUMENT, None)),
+        };
+        let n = Network {
+            handle: i.networkHandle as u64,
+            v4,
+            v6,
+            mtu: i.mtu as u32,
+        };
+        if i.networkHandle == 0 || i.mtu < 0 || !n.valid() {
+            return Err(Status::new_exception(ExceptionCode::ILLEGAL_ARGUMENT, None));
+        }
+        self.enqueue(Event::Report(
+            self.epoch.load(Ordering::Acquire),
+            r,
+            Some(n),
+        ))
+    }
+    fn onPdnDown(&self, r: &PdnRequest) -> binder::Result<()> {
+        if app_uid() != Some(self.broker_uid.load(Ordering::Acquire)) {
+            return Err(denied());
+        }
+        self.enqueue(Event::Report(
+            self.epoch.load(Ordering::Acquire),
+            key(r)?,
+            None,
+        ))
+    }
+    fn onPdnFailed(&self, r: &PdnRequest, _why: PdnFailure) -> binder::Result<()> {
+        if app_uid() != Some(self.broker_uid.load(Ordering::Acquire)) {
+            return Err(denied());
+        }
+        self.enqueue(Event::Failed(self.epoch.load(Ordering::Acquire), key(r)?))
+    }
+}
+fn prop(name: &str) -> Option<String> {
+    rustutils::android::system_properties::read(name)
+        .ok()
+        .flatten()
+}
+fn number(name: &str) -> io::Result<u32> {
+    prop(name)
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| io::Error::other("missing device configuration"))
+}
+fn request(r: Request) -> PdnRequest {
+    PdnRequest {
+        slot: r.key.slot,
+        r#type: if r.key.kind == Kind::Ims {
+            PdnType::IMS
+        } else {
+            PdnType::EMERGENCY
+        },
+        serial: r.serial,
+    }
+}
+/// The reserved port cannot be bound while the old descriptor owns it, so there
+/// is no socket to serve until a replacement binds. Retry with bounded backoff
+/// instead of stopping the daemon. None only when asked to stop meanwhile.
+fn rebind(
+    socket: Qrtr,
+    engine: &mut Engine,
+    diagnostics: &Mutex<Diagnostics>,
+) -> io::Result<Option<Qrtr>> {
+    const FIRST_REBIND_DELAY_MS: u64 = 100;
+    const MAX_REBIND_DELAY_MS: u64 = 5_000;
+    let mut delay = FIRST_REBIND_DELAY_MS;
+    let mut attempt = socket.rebind_imsdcm();
+    loop {
+        match attempt {
+            Ok(socket) => return Ok(Some(socket)),
+            Err(_) => engine.socket_rebind_failed(),
+        }
+        *diagnostics
+            .lock()
+            .map_err(|_| io::Error::other("diagnostic state"))? = engine.diagnostics();
+        if STOP.load(Ordering::Relaxed) {
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(delay));
+        delay = delay.saturating_mul(2).min(MAX_REBIND_DELAY_MS);
+        attempt = Qrtr::bind_imsdcm();
+    }
+}
+fn run() -> io::Result<()> {
+    if unsafe { libc::getuid() } != 2990 {
+        return Err(io::Error::other("wrong daemon uid"));
+    }
+    // Vendor Binder does not expose requesting-SID. The broker-only SELinux
+    // neverallows are the first authentication layer. Never operate without them.
+    if std::fs::read_to_string("/sys/fs/selinux/enforce")?.trim() != "1" {
+        return Err(io::Error::other("enforcing SELinux required"));
+    }
+    // Validate immutable policy before advertising Binder or QRTR services.
+    if prop("ro.vendor.diamaneos.ims.emergency_pdn").as_deref() != Some("serve") {
+        return Err(io::Error::other("emergency policy must be serve"));
+    }
+    let debug_controls = prop("ro.debuggable").as_deref() == Some("1");
+    let node = number("ro.vendor.diamaneos.ims.modem_node")?;
+    let slots = number("ro.vendor.diamaneos.ims.slots")?;
+    let mut engine = Engine::new(node, slots).map_err(io::Error::other)?;
+    let mut socket = Qrtr::bind_imsdcm()?;
+    if socket.local().node == node {
+        return Err(io::Error::other("modem node is local"));
+    }
+    let (tx, rx) = sync_channel(64);
+    let diagnostics = Arc::new(Mutex::new(engine.diagnostics()));
+    let service = BnImsDcm::new_binder(
+        Service {
+            sender: tx,
+            epoch: Arc::new(AtomicU64::new(0)),
+            queue_waits: Arc::new(AtomicU64::new(0)),
+            broker_uid: AtomicU32::new(0),
+            diagnostics: diagnostics.clone(),
+            debug_controls,
+        },
+        BinderFeatures::default(),
+    );
+    diamaneos_ims_runtime::seccomp::install()?;
+    ProcessState::set_thread_pool_max_thread_count(2);
+    ProcessState::start_thread_pool();
+    binder::add_service(SERVICE, service.as_binder())
+        .map_err(|_| io::Error::other("binder registration failed"))?;
+    // The first loop pass publishes. A collision is degradation, not a crash
+    // or a publication race.
+    let mut published = false;
+    let origin = Instant::now();
+    const PUBLICATION_RETRY_DELAY_MS: u64 = 30_000;
+    const MAX_RECEIVED_PACKETS_PER_CYCLE: usize = 32;
+    // Short receive waits only while output is queued or input is flowing. When
+    // idle, a Binder event waits at most IDLE_WAIT_MS. Switches are read each second.
+    const BUSY_WAIT_MS: u64 = 25;
+    const IDLE_WAIT_MS: u64 = 100;
+    const KILL_SWITCH_PERIOD_MS: u64 = 1_000;
+    let mut next_publication = 0;
+    let mut next_kill_check = 0;
+    let mut emergency_enabled = true;
+    let mut input = false;
+    let mut dispatch = Dispatch::default();
+    // SAFETY: handler only stores an atomic flag. No allocation or I/O in signals.
+    unsafe {
+        libc::signal(libc::SIGINT, stop as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, stop as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGHUP, stop as *const () as libc::sighandler_t);
+    }
+    let mut broker: Option<Broker> = None;
+    let mut latest_registration = 0;
+    let operation = (|| -> io::Result<()> {
+        while !STOP.load(Ordering::Relaxed) {
+            let now = origin.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+            if !published && now >= next_publication {
+                next_publication = now.saturating_add(PUBLICATION_RETRY_DELAY_MS);
+                match socket.publish() {
+                    Ok(Publication::Ready) => published = true,
+                    Ok(Publication::Conflict) => engine.publisher_conflict(),
+                    Err(error) if exhausted(&error) => engine.transport_exhausted(),
+                    Err(error) => match classify(&error) {
+                        Fault::Retry => (),
+                        Fault::PeerGone | Fault::SocketReset => dispatch.socket_reset = true,
+                        Fault::Unexpected => return Err(error),
+                    },
+                }
+            }
+            if debug_controls && now >= next_kill_check {
+                next_kill_check = now.saturating_add(KILL_SWITCH_PERIOD_MS);
+                if prop(DCM_KILL).as_deref() == Some("1") {
+                    break;
+                }
+                emergency_enabled = prop(EMERGENCY_PDN_KILL).as_deref() != Some("1");
+            }
+            let out = engine.set_emergency_enabled(emergency_enabled);
+            dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
+            let mut busy = input;
+            // Bound work per iteration so a broker flood cannot starve QRTR or signals.
+            for _ in 0..32 {
+                let e = match rx.try_recv() {
+                    Ok(e) => e,
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        return Err(io::Error::other("binder disconnected"))
+                    }
+                };
+                busy = true;
+                let out = match e {
+                    Event::Register(epoch, b, d) => {
+                        if epoch <= latest_registration {
+                            continue;
+                        }
+                        latest_registration = epoch;
+                        if broker.is_some() {
+                            let out = engine.broker_lost();
+                            dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
+                        }
+                        broker = Some((epoch, b, d));
+                        engine.broker_connected()
+                    }
+                    Event::Lost(epoch) => {
+                        latest_registration = latest_registration.max(epoch);
+                        if broker.as_ref().is_some_and(|b| b.0 == epoch) {
+                            broker = None;
+                            engine.broker_lost()
+                        } else {
+                            vec![]
+                        }
+                    }
+                    Event::Report(epoch, r, n) => {
+                        if broker.as_ref().is_some_and(|b| b.0 == epoch) {
+                            engine.report(r, n)
+                        } else {
+                            vec![]
+                        }
+                    }
+                    Event::Failed(epoch, r) => {
+                        if broker.as_ref().is_some_and(|b| b.0 == epoch) {
+                            engine.failed(r)
+                        } else {
+                            vec![]
+                        }
+                    }
+                };
+                dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
+            }
+            let wait = if busy || dispatch.queued() {
+                BUSY_WAIT_MS
+            } else {
+                IDLE_WAIT_MS
+            };
+            input = false;
+            // Drain a bounded quantum, as for Binder events, so a local flood of
+            // the reserved port cannot crowd modem requests out of the socket.
+            for index in 0..MAX_RECEIVED_PACKETS_PER_CYCLE {
+                if dispatch.socket_reset {
+                    break;
+                }
+                let wait = if index == 0 {
+                    Duration::from_millis(wait)
+                } else {
+                    Duration::ZERO
+                };
+                let (peer, bytes) = match socket.receive(wait) {
+                    Ok(Some(packet)) => {
+                        input = true;
+                        packet
+                    }
+                    Ok(None) => break,
+                    Err(error) => match classify(&error) {
+                        Fault::Retry => {
+                            if exhausted(&error) {
+                                engine.transport_exhausted();
+                            }
+                            break;
+                        }
+                        // A socket-wide receive failure has no destination peer.
+                        Fault::PeerGone | Fault::SocketReset => {
+                            dispatch.socket_reset = true;
+                            break;
+                        }
+                        Fault::Unexpected => return Err(error),
+                    },
+                };
+                let out = if peer.port == CTRL_PORT && peer.node == socket.local().node {
+                    match Control::decode(&bytes) {
+                        Some(c) if c.conflicts_with(socket.local()) => {
+                            engine.publisher_conflict();
+                            vec![] // Preserve live clients. Ownership is a separate kernel gate.
+                        }
+                        Some(c) if c.remote_server(socket.local()) => {
+                            engine.remote_publisher();
+                            vec![]
+                        }
+                        Some(c) if c.command == DEL_CLIENT => {
+                            let lost = c.deleted_client().unwrap();
+                            dispatch.purge_peer(&mut engine, broker.as_ref(), lost);
+                            engine.peer_gone(lost)
+                        }
+                        Some(c) if c.command == BYE => {
+                            dispatch.purge_node(&mut engine, broker.as_ref(), c.words[0]);
+                            engine.node_gone(c.words[0])
+                        }
+                        _ => vec![],
+                    }
+                } else {
+                    engine.receive(peer, &bytes)
+                };
+                dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
+            }
+            // Revoke the failed broker's positive outputs before attempting a send.
+            if let Some(epoch) = dispatch.broker_lost.take() {
+                if broker.as_ref().is_some_and(|current| current.0 == epoch) {
+                    broker = None;
+                    let out = engine.broker_lost();
+                    dispatch.apply(&socket, &mut engine, None, out, now)?;
+                }
+            }
+            if !dispatch.socket_reset {
+                dispatch.flush(&socket, &mut engine, broker.as_ref(), now)?;
+            }
+            if let Some(epoch) = dispatch.broker_lost.take() {
+                if broker.as_ref().is_some_and(|current| current.0 == epoch) {
+                    broker = None;
+                    let out = engine.broker_lost();
+                    dispatch.apply(&socket, &mut engine, None, out, now)?;
+                }
+            }
+            if std::mem::take(&mut dispatch.socket_reset) {
+                // Withdraw this modem's state before replacing the socket.
+                dispatch.purge_all(&mut engine, broker.as_ref());
+                let out = engine.node_gone(node);
+                dispatch.apply(&socket, &mut engine, broker.as_ref(), out, now)?;
+                engine.publication_active(false);
+                socket = match rebind(socket, &mut engine, &diagnostics)? {
+                    Some(socket) => socket,
+                    None => break,
+                };
+                published = false;
+                next_publication = now;
+            }
+            engine.publication_active(published);
+            *diagnostics
+                .lock()
+                .map_err(|_| io::Error::other("diagnostic state"))? = engine.diagnostics();
+        }
+        Ok(())
+    })();
+    dispatch.shutdown(&mut engine, broker.as_ref());
+    operation
+}
+fn main() {
+    if run().is_err() {
+        eprintln!("imsdcmd: service stopped after an operational failure");
+        std::process::exit(1);
+    }
+}
