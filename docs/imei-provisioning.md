@@ -79,10 +79,15 @@ or `order: normal after a failed reversed write`, and sets
 - `unchanged`: the modem already had the normal pair.
 - `failed`: anything else, including a run that ended early.
 
-After `written` the phone process (telephony) shows one notification with
-Android's translated "Restart your device to access the mobile network." and a
-Restart action. It shows once per such boot and is gone after the restart.
-Nothing restarts the phone without the user.
+On the first boot after a clean install (`reversed` with fresh userdata) the
+phone process (telephony) offers a restart, as Wi-Fi calling can fail on that
+boot until one:
+
+- One notification with Android's translated "Wi-Fi calling" and "Restart your
+  device to access the mobile network.", and a Restart action.
+- Updates keep userdata, and a factory reset finds the IMEIs in place, so
+  neither shows it.
+- Nothing restarts the phone without the user.
 
 ## Bluetooth address (`--bt-address`)
 
