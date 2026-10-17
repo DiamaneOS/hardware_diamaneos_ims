@@ -17,8 +17,9 @@ status property (below).
    no placeholder constant is in the source.
 3. Reads the modem's current NV IMEI (item 550) over the Fairphone TCL QMI
    service on QRTR and compares it with the traceability values.
-4. In `--write` mode only: writes the NV item for both subscriptions, then
-   reads slot 1 back to verify (the read has no subscription selector).
+4. In `--write` mode only: writes the NV item for both subscriptions, in the
+   order described [below](#status-and-slot-order), then reads subscription 0
+   back to verify (the read has no subscription selector).
 
 It logs only booleans and counters (logcat tag `imeiprovd`), never an IMEI or
 other identifier.
@@ -30,9 +31,9 @@ other identifier.
   is on that node, as announced by the local QRTR name service.
 - `--write`: the shipped configuration, run once per boot by `imeiprovd.rc`.
   As `--check`, then, only after a successful read, provisions both
-  subscriptions and reads back. It writes even when slot 1 already matches:
-  the read cannot show slot 2, so a boot whose slot 2 write failed would
-  otherwise never write it again.
+  subscriptions and reads back. It writes even when subscription 0 already
+  matches: the read cannot show subscription 1, so a boot whose subscription
+  1 write failed would otherwise never write it again.
   - Refuses to write unless both traceability IMEIs are 15 digits, pass the Luhn
     check and differ.
   - A failed write or read-back is logged and the tool exits non-zero. It does
@@ -51,21 +52,35 @@ Stock `tctd` writes the IMEIs at every boot for the same reason.
 
 ## Status and slot order
 
-When the modem starts without the IMEIs and takes them at runtime, it pairs
-them with the SIM slots the other way round from the box. A modem restart keeps
-that pairing. A phone restart, which starts the modem with the IMEIs already in
-NV, gives the box order.
+On a boot that starts from the modem's golden file system (clean install,
+every slot switch) the modem serves subscription 0 on SIM slot 1. On every
+later boot it serves subscription 1 there. A modem restart keeps the pairing
+of the boot, only a phone restart changes it. Stock writes the traceability
+value at 0x24 to subscription 0, which gives the box order on later boots
+only. So `--write` picks the pair from what subscription 0 holds:
 
-`--write` sets `vendor.diamaneos.imei.status` to `running` when it starts, then:
+- Nothing (golden file system): the reversed pair, 0x263 to subscription 0.
+  The SIM slots show the box order on this boot. If any step fails it writes
+  the normal pair instead.
+- The 0x263 value (an earlier boot wrote the reversed pair): the normal pair,
+  subscription 1 first, so subscription 0 keeps that marker until both are
+  written. The modem then holds the normal pair, as on stock.
+- Anything else: the normal pair.
 
-- `written`: the modem started without the IMEIs and took both. The slot order
-  is swapped until the phone restarts.
-- `unchanged`: the modem already had them.
+It logs the choice as `order: reversed`, `order: corrected`, `order: normal`
+or `order: normal after a failed reversed write`, and sets
+`vendor.diamaneos.imei.status` to `running` when it starts, then:
+
+- `reversed`: first write, reversed pair. Box order on this boot.
+- `corrected`: the reversed pair from an earlier boot was put back.
+- `written`: the modem took the normal pair although it did not hold it
+  before. After a clean install or a slot switch the order is swapped until
+  the phone restarts.
+- `unchanged`: the modem already had the normal pair.
 - `failed`: anything else, including a run that ended early.
 
 The setup wizard's last step reads it and offers a restart after `written`.
-Nothing else restarts the phone for it. If an update leaves the modem without
-the IMEIs, the order stays swapped until the next restart.
+Nothing else restarts the phone for it.
 
 ## Bluetooth address (`--bt-address`)
 
@@ -196,8 +211,9 @@ from the RFC 7042 documentation range.
      traceability decode works.
    - `modem: read_ok=true provisioned=...`: the modem's value before the
      write. It is `provisioned=false` after a slot switch or an OTA.
-   - `write: sub0_ok=true sub1_ok=true verify_slot1=true`
-   - `status: written` (or `unchanged` on later boots)
+   - `order: reversed` (or `corrected` on the next boot, `normal` later)
+   - `write: sub0_ok=true sub1_ok=true verified=true`
+   - `status: reversed` (then `corrected`, then `unchanged`)
 3. `*#06#` shows the real IMEIs on both slots.
 
 A failed read logs `read_ok=false reason=...` with the error kind or NV status

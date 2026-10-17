@@ -24,4 +24,4 @@ ro.vendor.diamaneos.bt.factory_address u:object_r:vendor_diamaneos_bt_address_pr
 
 # What imeiprovd --write did to the modem's IMEIs this boot, set only by
 # imeiprovd and read by the setup wizard (property.te, imeiprov.te).
-vendor.diamaneos.imei.status u:object_r:vendor_diamaneos_imei_status_prop:s0 exact enum running written unchanged failed
+vendor.diamaneos.imei.status u:object_r:vendor_diamaneos_imei_status_prop:s0 exact enum running written unchanged failed reversed corrected

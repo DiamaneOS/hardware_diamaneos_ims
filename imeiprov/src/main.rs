@@ -28,7 +28,7 @@ use client::Client;
 use diamaneos_imeiprov::bdaddr::BdAddr;
 use diamaneos_imeiprov::imei::{check_pair, Imei};
 use diamaneos_imeiprov::message;
-use diamaneos_imeiprov::provision::{self, Modem, Status};
+use diamaneos_imeiprov::provision::{self, Modem, Order, Status, Written};
 use diamaneos_imeiprov::wlanmac::WlanMac;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
@@ -153,19 +153,20 @@ fn run() -> i32 {
         txn: 1,
     };
     if mode == Mode::Write && pair.usable() {
-        let (before, written) = match provision::write_run(&mut modem, &slot1, &slot2) {
+        let run = match provision::write_run(&mut modem, &slot1, &slot2) {
             Ok(run) => run,
             Err(e) => return read_failed(&e),
         };
-        log_modem(before, &slot1, &slot2);
-        info(&format!(
-            "write: sub0_ok={} sub1_ok={} verify_slot1={}",
-            written.sub0_ok, written.sub1_ok, written.verify_slot1
-        ));
-        if let Some(report) = report {
-            report.finish(Status::of(before, &slot1, &written));
+        log_modem(run.before, &slot1, &slot2);
+        if let Order::Fallback(reversed) = run.order {
+            log_written("reversed write", &reversed);
         }
-        return if written.ok() { 0 } else { 1 };
+        info(&format!("order: {}", run.order.as_str()));
+        log_written("write", &run.written);
+        if let Some(report) = report {
+            report.finish(Status::of(&run, &slot1));
+        }
+        return if run.written.ok() { 0 } else { 1 };
     }
     match modem.read() {
         Ok(before) => log_modem(before, &slot1, &slot2),
@@ -222,6 +223,13 @@ fn log_modem(value: Option<Imei>, slot1: &Imei, slot2: &Imei) {
         )),
         None => info("modem: read_ok=true provisioned=false"),
     }
+}
+
+fn log_written(what: &str, written: &Written) {
+    info(&format!(
+        "{what}: sub0_ok={} sub1_ok={} verified={}",
+        written.sub0_ok, written.sub1_ok, written.verified
+    ));
 }
 
 fn read_failed(e: &ReadFail) -> i32 {
