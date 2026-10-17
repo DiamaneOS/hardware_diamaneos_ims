@@ -8,3 +8,9 @@
 
 [AID_VENDOR_IMSDCM]
 value: 2990
+
+# Vendor user and group of the one-shot IMEI provisioning tool (imeiprovd.rc).
+# 2990/2991 are the IMS DCM daemon and Wi-Fi reporter. 2992/2993 are pd-mapper
+# and tqftpserv (device repo modem/config.fs), so this takes 2994.
+[AID_VENDOR_IMEIPROV]
+value: 2994

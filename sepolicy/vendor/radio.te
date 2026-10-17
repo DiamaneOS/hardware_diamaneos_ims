@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The DiamaneOS Project
+# The phone process reads imeiprovd's IMEI status to offer a restart after a
+# clean install (property.te). Read only, this one property. Telephony already
+# holds the IMEIs themselves.
+get_prop(radio, vendor_diamaneos_imei_status_prop)

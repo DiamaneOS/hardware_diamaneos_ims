@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "diamaneos-imeiprov"
+version = "0.1.0"
+dependencies = [
+ "diamaneos-ims-dcm",
+ "libc",
+]
+
+[[package]]
 name = "diamaneos-ims-dcm"
 version = "0.1.0"
 

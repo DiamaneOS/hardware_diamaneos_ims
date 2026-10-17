@@ -23,16 +23,23 @@ carrier behavior: see [verification](docs/verification.md).
 - `wlan-observer/`: passive observation of the connected Wi-Fi link, with no
   Internet, location or phone-state permission.
 - `integration/`: emergency-APN comparison tooling and source IWLAN provenance.
+- `imeiprov/`: one-shot [IMEI provisioning](docs/imei-provisioning.md)
+  (`imeiprovd`), with its own vendor UID and SELinux domain.
+  - Reads the read-only traceability partition and writes modem NV 550 over
+    the Fairphone TCL QMI service.
+  - Reports in a property whether this boot wrote them, so the phone can offer
+    a restart after a clean install.
 
-VoWiFi integration is described in [Wi-Fi calling](docs/wifi-calling.md).
-The device-selected [Wi-Fi reporter](docs/wlan-reporting-design.md) separates
-Android observations from modem access. It completes supported notification requests without inventing quality results.
-User and userdebug builds use the same protocol path. Final native and device
-qualification remain required before release. It is selected only by explicitly including `wlan-product.mk` and
-`wlan-board.mk` alongside the native Qualcomm IWLAN path.
-AML (Advanced Mobile Location) is not part of DiamaneOS. Its app, in
-[platform_packages_apps_EmergencyLocation](https://github.com/DiamaneOS/platform_packages_apps_EmergencyLocation),
-is not in the build and is not needed to build or test this repository.
+## Wi-Fi calling
+
+- [Wi-Fi calling](docs/wifi-calling.md) describes the VoWiFi integration.
+- The [Wi-Fi reporter](docs/wlan-reporting-design.md) keeps Android
+  observations apart from modem access and completes supported notification
+  requests without inventing quality results.
+- It is selected only by including `wlan-product.mk` and `wlan-board.mk`
+  alongside native Qualcomm IWLAN.
+
+AML (Advanced Mobile Location) is not part of DiamaneOS.
 
 ## Tests
 

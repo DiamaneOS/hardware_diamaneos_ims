@@ -5,3 +5,10 @@
 # sets the build defaults from /vendor/build.prop (vendor_init.te). On
 # debuggable builds root can change them.
 vendor_internal_prop(vendor_diamaneos_imsdcm_prop)
+
+# vendor.diamaneos.imei.status: what imeiprovd --write did to the modem's IMEIs
+# this boot. "reversed" means the modem started without them. With fresh
+# userdata that is a clean install, and the phone process offers a restart.
+# Vendor restricted: only imeiprovd sets it (imeiprov.te) and the phone process
+# reads it (radio.te).
+vendor_restricted_prop(vendor_diamaneos_imei_status_prop)
