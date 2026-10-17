@@ -79,8 +79,10 @@ or `order: normal after a failed reversed write`, and sets
 - `unchanged`: the modem already had the normal pair.
 - `failed`: anything else, including a run that ended early.
 
-The setup wizard's last step reads it and offers a restart after `written`.
-Nothing else restarts the phone for it.
+After `written` the phone process (telephony) shows one notification with
+Android's translated "Restart your device to access the mobile network." and a
+Restart action. It shows once per such boot and is gone after the restart.
+Nothing restarts the phone without the user.
 
 ## Bluetooth address (`--bt-address`)
 
@@ -152,8 +154,8 @@ address.
   writing the Wi-Fi MAC file (`vendor_diamaneos_wlan_mac_file`, which also
   labels its directories).
 - Only imeiprovd, init and vendor_init may set the status. Besides imeiprovd,
-  only the setup wizard's domain (`platform_app`), init, vendor_init and
-  dumpstate may read it.
+  only the phone process (`radio`), init, vendor_init and dumpstate may read
+  it.
 - `neverallow` rules forbid capabilities, any non-QRTR socket, writing any
   block device, setting any other property, adding names to any other
   directory, reading the MAC file back, and Binder.

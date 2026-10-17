@@ -15,7 +15,7 @@ vendor_internal_prop(vendor_diamaneos_bt_address_prop)
 
 # vendor.diamaneos.imei.status: what imeiprovd --write did to the modem's IMEIs
 # this boot. "written" means the modem started without them and pairs them with
-# the SIM slots the other way round until a restart, so the setup wizard offers
-# one. Vendor restricted: only imeiprovd sets it (imeiprov.te) and the setup
-# wizard's domain reads it (platform_app.te).
+# the SIM slots the other way round until a restart, so the phone process
+# offers one. Vendor restricted: only imeiprovd sets it (imeiprov.te) and the
+# phone process reads it (radio.te).
 vendor_restricted_prop(vendor_diamaneos_imei_status_prop)
