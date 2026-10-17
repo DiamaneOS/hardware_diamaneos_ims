@@ -1,5 +1,0 @@
-# SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The DiamaneOS Project
-# The setup wizard (platform signed) reads imeiprovd's IMEI status to offer a
-# restart after the first write (property.te). Read only, this one property.
-get_prop(platform_app, vendor_diamaneos_imei_status_prop)

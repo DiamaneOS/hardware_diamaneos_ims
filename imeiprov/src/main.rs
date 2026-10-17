@@ -8,7 +8,7 @@
 //! reading back. With `--bt-address` it instead reads the factory Bluetooth
 //! address from the same partition, validates it and sets it in one property
 //! (`ro.vendor.diamaneos.bt.factory_address`), which only this domain may set.
-//! `--write` publishes its outcome in [`STATUS_PROPERTY`], so the setup wizard
+//! `--write` publishes its outcome in [`STATUS_PROPERTY`], so the phone process
 //! can offer a restart after a first write. With `--wlan-mac` it reads the
 //! factory Wi-Fi MAC, validates it and writes the WLAN driver's MAC file to a
 //! RAM-backed path only this domain may write ([`WLAN_MAC_FILE`]). It opens no
@@ -47,8 +47,8 @@ const EXPECTED_UID: u32 = 2994;
 /// implementation reads.
 const BT_ADDRESS_PROPERTY: &str = "ro.vendor.diamaneos.bt.factory_address";
 
-/// `--write` outcome ([`Status`]). Only this domain sets it and the setup
-/// wizard reads it.
+/// `--write` outcome ([`Status`]). Only this domain sets it and the phone
+/// process reads it.
 const STATUS_PROPERTY: &str = "vendor.diamaneos.imei.status";
 
 /// Written once per boot by `--wlan-mac`. The tree is in RAM (tmpfs), created

@@ -62,7 +62,7 @@ neverallow diamaneos_imeiprov {
   -vendor_diamaneos_bt_address_prop
   -vendor_diamaneos_imei_status_prop
 }:property_service set;
-# Only imeiprovd reports the IMEI status. Only the setup wizard's domain reads
+# Only imeiprovd reports the IMEI status. Only the phone process (radio) reads
 # it, besides imeiprovd and the domains that read every property.
 neverallow { domain -init -vendor_init -diamaneos_imeiprov } vendor_diamaneos_imei_status_prop:property_service set;
 neverallow {
@@ -70,7 +70,7 @@ neverallow {
   -init
   -vendor_init
   -dumpstate
-  -platform_app
+  -radio
   -diamaneos_imeiprov
 } vendor_diamaneos_imei_status_prop:file { open read map };
 # Only imeiprovd sets the factory Bluetooth address (init may set any property,
