@@ -20,6 +20,8 @@ import android.os.IBinder;
 import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.os.UserManager;
+import android.telephony.SubscriptionManager;
+import android.telephony.ims.ImsMmTelManager;
 import android.util.Log;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
@@ -36,6 +38,7 @@ public final class ObserverApp extends Application {
     // Passive refresh: three missed heartbeats expire the reporter's 30s lease.
     // Actual network callbacks and current-reporter death publish immediately.
     private static final long HEARTBEAT_INTERVAL_MS = 10_000;
+    private static final int MAX_SLOTS = 2;
     private Handler handler;
     private ConnectivityManager connectivity;
     private WifiManager wifi;
@@ -94,7 +97,32 @@ public final class ObserverApp extends Application {
                 handler.post(heartbeat);
             }
         }, handler);
+        // Wi-Fi calling switches change the subscription record. The heartbeat rereads them too.
+        getSystemService(SubscriptionManager.class).addOnSubscriptionsChangedListener(
+                handler::post, new SubscriptionManager.OnSubscriptionsChangedListener() {
+                    @Override public void onSubscriptionsChanged() {
+                        handler.removeCallbacks(heartbeat);
+                        handler.post(heartbeat);
+                    }
+                });
         handler.post(heartbeat);
+    }
+
+    /** Slots whose SIM has Wi-Fi calling on. An unreadable setting counts as off. */
+    private int wifiCallingSlots() {
+        int slots = 0;
+        for (int slot = 0; slot < MAX_SLOTS; slot++) {
+            int subscription = SubscriptionManager.getSubscriptionId(slot);
+            if (!SubscriptionManager.isValidSubscriptionId(subscription)) continue;
+            try {
+                if (ImsMmTelManager.createForSubscriptionId(subscription).isVoWiFiSettingEnabled()) {
+                    slots |= 1 << slot;
+                }
+            } catch (RuntimeException e) {
+                unavailable("Wi-Fi calling state unavailable");
+            }
+        }
+        return slots;
     }
 
     private Snapshot read() {
@@ -184,9 +212,12 @@ public final class ObserverApp extends Application {
         reporter = null; binder = null; lifetime = null; death = null;
     }
     private void publish() {
-        final Snapshot snapshot;
+        Snapshot snapshot;
         try {
             snapshot = read();
+            snapshot.wifiCallingSlots = wifiCallingSlots();
+            // Without Wi-Fi calling the modem gets no Wi-Fi details at all.
+            if (snapshot.wifiCallingSlots == 0) snapshot = disconnected(snapshot.enabled);
         } catch (RuntimeException ignored) {
             unavailable("Observation read unavailable");
             return; // No refresh: the existing observation lease will expire.
@@ -217,7 +248,8 @@ public final class ObserverApp extends Application {
                     ReporterStatus status = reporter.getStatus(generation);
                     // Numeric connectivity facts only. No link or SIM identifiers.
                     int flags = (snapshot.enabled ? 1 : 0) | (snapshot.connected ? 2 : 0)
-                            | (snapshot.validated ? 4 : 0) | (snapshot.defaultRoute ? 8 : 0);
+                            | (snapshot.validated ? 4 : 0) | (snapshot.defaultRoute ? 8 : 0)
+                            | (snapshot.wifiCallingSlots << 4);
                     String summary = "observation=" + flags + " primary=" + status.primaryStage
                             + "/" + status.primaryOperation
                             + "/" + status.primaryError + " secondary=" + status.secondaryStage

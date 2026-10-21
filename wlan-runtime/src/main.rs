@@ -22,7 +22,7 @@ use diamaneos_wlan_reporting::{
     session::{Observation, Session},
     Connected, DSD_SERVICE,
 };
-use diamaneos_wlan_runtime::Observations;
+use diamaneos_wlan_runtime::{for_subscription, Observations};
 use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr},
@@ -51,6 +51,7 @@ extern "C" fn stop(_: libc::c_int) {
 }
 struct Shared {
     observations: Observations,
+    wifi_calling_slots: u32,
     uid: Option<u32>,
     death: Option<DeathRecipient>,
     lifetime: Option<SpIBinder>,
@@ -130,7 +131,7 @@ impl IReporter for Service {
         Ok(generation as i64)
     }
     fn observe(&self, generation: i64, sequence: i64, snapshot: &Snapshot) -> binder::Result<()> {
-        if generation <= 0 || sequence <= 0 {
+        if generation <= 0 || sequence <= 0 || !(0..=3).contains(&snapshot.wifiCallingSlots) {
             return Err(invalid());
         }
         let network = if snapshot.connected {
@@ -186,6 +187,7 @@ impl IReporter for Service {
         ) {
             return Err(invalid());
         }
+        s.wifi_calling_slots = snapshot.wifiCallingSlots as u32;
         Ok(())
     }
 }
@@ -394,6 +396,7 @@ fn run() -> io::Result<()> {
     let origin = monotonic_ms();
     let shared = Arc::new(Mutex::new(Shared {
         observations: Observations::default(),
+        wifi_calling_slots: 0,
         uid: None,
         death: None,
         lifetime: None,
@@ -423,16 +426,20 @@ fn run() -> io::Result<()> {
     }
     while !STOP.load(Ordering::Relaxed) {
         let now = elapsed(origin);
-        let observation = shared
-            .lock()
-            .map_err(|_| io::Error::other("observer state"))?
-            .observations
-            .current(now);
+        let (observation, wifi_calling_slots) = {
+            let mut s = shared
+                .lock()
+                .map_err(|_| io::Error::other("observer state"))?;
+            (s.observations.current(now), s.wifi_calling_slots)
+        };
         // Reconcile startup modem state even before an observer is available.
         // Session waits after clears. Only authenticated observations can send
         // switch state or replay positive connectivity.
         for client in &mut clients {
-            client.step(node, observation.as_ref(), now)?;
+            let seen = observation
+                .as_ref()
+                .map(|o| for_subscription(o, wifi_calling_slots, client.subscription));
+            client.step(node, seen.as_ref(), now)?;
         }
         let mut s = shared
             .lock()

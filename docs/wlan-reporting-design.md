@@ -164,9 +164,12 @@ Observer:
 - Handles one unambiguous connected Internet-capable Wi-Fi network. Withdraws on
   ambiguous multi-STA observations, loss, revocation or expiry. Multi-STA is
   not supported.
-- SIM identity stays modem-owned: the observer has no phone-state permission.
-  The reporter binds only the configured modem subscription contexts. Removal
-  and reassignment need device tests.
+- SIM identity stays modem-owned. The observer reads only whether Wi-Fi calling
+  is on for each SIM slot, and the reporter binds only the configured modem
+  subscription contexts. Removal and reassignment need device tests.
+- Only a subscription whose SIM has Wi-Fi calling on gets the BSSID, addresses
+  and DNS servers. The others get the zero-BSSID disconnected form. With Wi-Fi
+  calling off everywhere, the details do not leave the observer.
 
 ## Non-sensitive status
 

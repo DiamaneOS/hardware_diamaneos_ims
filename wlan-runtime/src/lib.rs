@@ -65,3 +65,20 @@ impl Observations {
         self.value.clone()
     }
 }
+
+/// What one modem subscription may see. Wi-Fi details go only to a SIM with
+/// Wi-Fi calling on (bit `subscription - 1` of `wifi_calling_slots`).
+pub fn for_subscription(
+    observation: &Observation,
+    wifi_calling_slots: u32,
+    subscription: u32,
+) -> Observation {
+    let on = subscription
+        .checked_sub(1)
+        .and_then(|slot| 1u32.checked_shl(slot))
+        .is_some_and(|bit| wifi_calling_slots & bit != 0);
+    Observation {
+        enabled: observation.enabled,
+        network: observation.network.clone().filter(|_| on),
+    }
+}

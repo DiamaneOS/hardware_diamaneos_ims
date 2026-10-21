@@ -5,6 +5,9 @@ app_domain(diamaneos_wlan_observer)
 binder_use(diamaneos_wlan_observer)
 allow diamaneos_wlan_observer { activity_service connectivity_service wifi_service netpolicy_service power_service thermal_service user_service permission_service package_service }:service_manager find;
 allow diamaneos_wlan_observer diamaneos_wlan_reporter_service:service_manager find;
+# Wi-Fi calling state per SIM, and subscription change callbacks.
+allow diamaneos_wlan_observer { radio_service registry_service }:service_manager find;
+allow diamaneos_wlan_observer radio:binder call;
 # The frozen callback carries Binder references and values, never file descriptors.
 allow diamaneos_wlan_observer diamaneos_wlan_reporter:binder { call transfer };
 allow diamaneos_wlan_reporter diamaneos_wlan_observer:binder transfer;

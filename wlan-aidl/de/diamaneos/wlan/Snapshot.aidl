@@ -15,4 +15,6 @@ parcelable Snapshot {
     byte[8] dns4;
     int dns6Count;
     byte[32] dns6;
+    /** Bit n: Wi-Fi calling is on for the SIM in slot n. Only those SIMs get the Wi-Fi details. */
+    int wifiCallingSlots;
 }

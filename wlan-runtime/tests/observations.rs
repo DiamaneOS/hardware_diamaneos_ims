@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 use diamaneos_wlan_reporting::{session::Observation, Connected};
-use diamaneos_wlan_runtime::Observations;
+use diamaneos_wlan_runtime::{for_subscription, Observations};
 fn network() -> Observation {
     Observation {
         enabled: true,
@@ -50,4 +50,14 @@ fn lease_expiry_withdraws_but_does_not_invent_wifi_switch_state() {
     assert!(s.current(30_101).unwrap().network.is_none());
     assert!(s.update(e, 1, 30_102, network()));
     assert!(s.current(30_103).unwrap().network.is_some());
+}
+#[test]
+fn wifi_details_reach_only_subscriptions_with_wifi_calling_on() {
+    let seen = network();
+    assert!(for_subscription(&seen, 0b01, 1).network.is_some());
+    assert!(for_subscription(&seen, 0b01, 2).network.is_none());
+    assert!(for_subscription(&seen, 0b10, 2).network.is_some());
+    assert!(for_subscription(&seen, 0, 1).network.is_none());
+    assert!(for_subscription(&seen, u32::MAX, 0).network.is_none());
+    assert!(for_subscription(&seen, 0, 1).enabled);
 }

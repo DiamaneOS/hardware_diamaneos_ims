@@ -21,7 +21,9 @@ carrier behavior: see [verification](docs/verification.md).
 - `wlan/`: bounded DSD protocol and acknowledgement state machine.
 - `wlan-runtime/`: isolated QRTR client and authenticated Binder snapshot adapter.
 - `wlan-observer/`: passive observation of the connected Wi-Fi link, with no
-  Internet, location or phone-state permission.
+  Internet or location permission.
+  - Reads only whether Wi-Fi calling is on for each SIM. The modem gets the
+    Wi-Fi details only for those SIMs.
 - `integration/`: emergency-APN comparison tooling and source IWLAN provenance.
 - `imeiprov/`: one-shot [IMEI provisioning](docs/imei-provisioning.md)
   (`imeiprovd`), with its own vendor UID and SELinux domain.

@@ -7,7 +7,7 @@ Each process runs as its own identity:
 | IMS DCM daemon | Vendor UID 2990, QRTR to the configured modem, own Binder service | Internet, SMS, location, arbitrary Binder peers, file writes, capabilities |
 | IMS broker | `CONNECTIVITY_USE_RESTRICTED_NETWORKS` | Internet permission, direct IP/modem sockets, location, SMS |
 | Wi-Fi reporter (optional) | UID 2991, configured modem DSD endpoint, private Binder service | Internet, location, SMS, routing changes, capabilities |
-| Wi-Fi observer (optional) | Passive Wi-Fi/network reads, `RADIO_SCAN_WITHOUT_LOCATION` | Internet permission, scans, location, phone-state and network-setting permissions |
+| Wi-Fi observer (optional) | Passive Wi-Fi/network reads, `RADIO_SCAN_WITHOUT_LOCATION`, the Wi-Fi calling setting per SIM (`READ_PRECISE_PHONE_STATE`) | Internet permission, scans, location, subscriber identifiers and network-setting permissions |
 
 ## DCM daemon
 
@@ -49,6 +49,8 @@ Each process runs as its own identity:
 authority.
 
 - The observer obtains same-link BSSID, addresses and bounded DNS metadata.
+- Only a SIM with Wi-Fi calling on gets them. The others get the disconnected
+  form.
 - The reporter validates and sends the verified DSD request subset.
 - Numeric status contains no network identifiers.
 - Check effective permission flags on the device: a manifest declaration alone
