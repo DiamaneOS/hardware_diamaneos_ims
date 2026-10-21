@@ -12,7 +12,10 @@ android_app {
     certificate: "platform",
     system_ext_specific: true,
     privileged: true,
-    required: ["sysconfig-de.diamaneos.wlanobserver.xml"],
+    required: [
+        "privapp-permissions-de.diamaneos.wlanobserver.xml",
+        "sysconfig-de.diamaneos.wlanobserver.xml",
+    ],
 }
 prebuilt_etc {
     name: "sysconfig-de.diamaneos.wlanobserver.xml",

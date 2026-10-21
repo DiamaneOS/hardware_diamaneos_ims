@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     SPDX-License-Identifier: Apache-2.0
+     Copyright 2026 The DiamaneOS Project
+
+     Privileged permission of the Wi-Fi observer (de.diamaneos.wlanobserver,
+     /system_ext/priv-app). Without this entry the system server refuses to
+     start, because the allowlist is enforced.
+
+     Granted:
+       READ_PRECISE_PHONE_STATE (signature|privileged): the Wi-Fi calling
+         setting of each SIM, so Wi-Fi details reach only SIMs with Wi-Fi
+         calling on.
+-->
+<permissions>
+    <privapp-permissions package="de.diamaneos.wlanobserver">
+        <permission name="android.permission.READ_PRECISE_PHONE_STATE" />
+    </privapp-permissions>
+</permissions>
