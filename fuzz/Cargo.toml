@@ -1,0 +1,106 @@
+# SPDX-License-Identifier: Apache-2.0
+# cargo-fuzz targets for every input parser. Needs a nightly toolchain:
+#   cargo +nightly fuzz run <target>
+# Not part of the main workspace, so `cargo test --offline` is unaffected.
+[package]
+name = "diamaneos-ims-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+diamaneos-ims-dcm = { path = "../dcm" }
+diamaneos-ims-runtime = { path = "../daemon" }
+diamaneos-imeiprov = { path = "../imeiprov" }
+diamaneos-wlan-reporting = { path = "../wlan" }
+diamaneos-wlan-runtime = { path = "../wlan-runtime" }
+
+# Keep this crate out of the parent workspace.
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "imeiprov_message"
+path = "fuzz_targets/imeiprov_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "imeiprov_trace"
+path = "fuzz_targets/imeiprov_trace.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "imeiprov_provision"
+path = "fuzz_targets/imeiprov_provision.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dcm_frame"
+path = "fuzz_targets/dcm_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dcm_qrtr_control"
+path = "fuzz_targets/dcm_qrtr_control.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dcm_engine"
+path = "fuzz_targets/dcm_engine.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "daemon_outbox"
+path = "fuzz_targets/daemon_outbox.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wlan_codec"
+path = "fuzz_targets/wlan_codec.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wlan_session"
+path = "fuzz_targets/wlan_session.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wlan_runtime_observations"
+path = "fuzz_targets/wlan_runtime_observations.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "daemon_broker_report"
+path = "fuzz_targets/daemon_broker_report.rs"
+test = false
+doc = false
+bench = false
