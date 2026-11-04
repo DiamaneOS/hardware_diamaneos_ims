@@ -6,11 +6,12 @@ use binder::{
     Strong, ThreadState,
 };
 use diamaneos_ims_dcm::{
-    engine::{Diagnostics, Engine, Key, Network, Request},
+    engine::{Diagnostics, Engine, Network, Request},
     protocol::PdnType as Kind,
     qrtr::*,
 };
 use diamaneos_ims_runtime::{
+    broker_report,
     socket::{Publication, Qrtr},
     transport::{classify, exhausted, Fault},
 };
@@ -19,7 +20,6 @@ use android_dispatch::{Broker, Dispatch};
 use std::{
     ffi::CStr,
     io,
-    net::{Ipv4Addr, Ipv6Addr},
     sync::{
         atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         mpsc::{sync_channel, SyncSender, TryRecvError, TrySendError},
@@ -99,19 +99,16 @@ fn app_uid() -> Option<u32> {
     (10000..20000).contains(&uid).then_some(uid)
 }
 
+fn illegal() -> Status {
+    Status::new_exception(ExceptionCode::ILLEGAL_ARGUMENT, None)
+}
 fn key(r: &PdnRequest) -> binder::Result<Request> {
     let kind = match r.r#type {
-        PdnType::IMS => Kind::Ims,
-        PdnType::EMERGENCY => Kind::Emergency,
-        _ => return Err(Status::new_exception(ExceptionCode::ILLEGAL_ARGUMENT, None)),
+        PdnType::IMS => Some(Kind::Ims),
+        PdnType::EMERGENCY => Some(Kind::Emergency),
+        _ => None,
     };
-    if !(-1..=2).contains(&r.slot) || r.serial <= 0 {
-        return Err(Status::new_exception(ExceptionCode::ILLEGAL_ARGUMENT, None));
-    }
-    Ok(Request {
-        key: Key { slot: r.slot, kind },
-        serial: r.serial,
-    })
+    broker_report::request(r.slot, kind, r.serial).ok_or_else(illegal)
 }
 /// A full queue blocks the calling Binder thread until the main loop drains it.
 /// Oneway reports and death notices then wait in the kernel instead of being
@@ -161,25 +158,8 @@ impl IImsDcm for Service {
             return Err(denied());
         }
         let r = key(r)?;
-        let v4 = match i.ipv4Address.as_slice() {
-            [] => None,
-            b if b.len() == 4 => Some(Ipv4Addr::from(<[u8; 4]>::try_from(b).unwrap())),
-            _ => return Err(Status::new_exception(ExceptionCode::ILLEGAL_ARGUMENT, None)),
-        };
-        let v6 = match i.ipv6Address.as_slice() {
-            [] => None,
-            b if b.len() == 16 => Some(Ipv6Addr::from(<[u8; 16]>::try_from(b).unwrap())),
-            _ => return Err(Status::new_exception(ExceptionCode::ILLEGAL_ARGUMENT, None)),
-        };
-        let n = Network {
-            handle: i.networkHandle as u64,
-            v4,
-            v6,
-            mtu: i.mtu as u32,
-        };
-        if i.networkHandle == 0 || i.mtu < 0 || !n.valid() {
-            return Err(Status::new_exception(ExceptionCode::ILLEGAL_ARGUMENT, None));
-        }
+        let n = broker_report::network(i.networkHandle, &i.ipv4Address, &i.ipv6Address, i.mtu)
+            .ok_or_else(illegal)?;
         self.enqueue(Event::Report(
             self.epoch.load(Ordering::Acquire),
             r,
