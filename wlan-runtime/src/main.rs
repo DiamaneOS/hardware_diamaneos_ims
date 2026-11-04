@@ -20,12 +20,11 @@ use diamaneos_ims_runtime::{
 };
 use diamaneos_wlan_reporting::{
     session::{Observation, Session},
-    Connected, DSD_SERVICE,
+    DSD_SERVICE,
 };
-use diamaneos_wlan_runtime::{for_subscription, Observations};
+use diamaneos_wlan_runtime::{for_subscription, observation, Observations, SnapshotFields};
 use std::{
     io,
-    net::{Ipv4Addr, Ipv6Addr},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
@@ -131,47 +130,27 @@ impl IReporter for Service {
         Ok(generation as i64)
     }
     fn observe(&self, generation: i64, sequence: i64, snapshot: &Snapshot) -> binder::Result<()> {
-        if generation <= 0 || sequence <= 0 || !(0..=3).contains(&snapshot.wifiCallingSlots) {
+        if generation <= 0 || sequence <= 0 {
             return Err(invalid());
         }
-        let network = if snapshot.connected {
-            if !snapshot.enabled || !(0..=128).contains(&snapshot.ipv6Prefix) {
-                return Err(invalid());
-            }
-            let v4 = snapshot.hasIpv4.then(|| Ipv4Addr::from(snapshot.ipv4));
-            let v6 = snapshot
-                .hasIpv6
-                .then(|| (Ipv6Addr::from(snapshot.ipv6), snapshot.ipv6Prefix as u8));
-            if !(0..=2).contains(&snapshot.dns4Count) || !(0..=2).contains(&snapshot.dns6Count) {
-                return Err(invalid());
-            }
-            let mut dns4 = [None; 2];
-            let mut dns6 = [None; 2];
-            for (index, bytes) in snapshot.dns4.chunks_exact(4).enumerate() {
-                if index < snapshot.dns4Count as usize {
-                    dns4[index] = Some(Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3]));
-                } else if bytes.iter().any(|b| *b != 0) {
-                    return Err(invalid());
-                }
-            }
-            for (index, bytes) in snapshot.dns6.chunks_exact(16).enumerate() {
-                if index < snapshot.dns6Count as usize {
-                    let mut address = [0; 16];
-                    address.copy_from_slice(bytes);
-                    dns6[index] = Some(Ipv6Addr::from(address));
-                } else if bytes.iter().any(|b| *b != 0) {
-                    return Err(invalid());
-                }
-            }
-            Some(
-                Connected::new(snapshot.bssid, v4, v6, snapshot.validated)
-                    .map(|network| network.with_default_route(snapshot.defaultRoute))
-                    .and_then(|network| network.with_dns(dns4, dns6))
-                    .map_err(|_| invalid())?,
-            )
-        } else {
-            None
-        };
+        let (observation, wifi_calling_slots) = observation(&SnapshotFields {
+            enabled: snapshot.enabled,
+            connected: snapshot.connected,
+            validated: snapshot.validated,
+            default_route: snapshot.defaultRoute,
+            bssid: snapshot.bssid,
+            has_ipv4: snapshot.hasIpv4,
+            ipv4: snapshot.ipv4,
+            has_ipv6: snapshot.hasIpv6,
+            ipv6: snapshot.ipv6,
+            ipv6_prefix: snapshot.ipv6Prefix,
+            dns4_count: snapshot.dns4Count,
+            dns4: snapshot.dns4,
+            dns6_count: snapshot.dns6Count,
+            dns6: snapshot.dns6,
+            wifi_calling_slots: snapshot.wifiCallingSlots,
+        })
+        .ok_or_else(invalid)?;
         let mut s = self.state.lock().map_err(|_| denied())?;
         if s.uid != Some(ThreadState::get_calling_uid()) {
             return Err(denied());
@@ -180,14 +159,11 @@ impl IReporter for Service {
             generation as u64,
             sequence as u64,
             elapsed(self.origin),
-            Observation {
-                enabled: snapshot.enabled,
-                network,
-            },
+            observation,
         ) {
             return Err(invalid());
         }
-        s.wifi_calling_slots = snapshot.wifiCallingSlots as u32;
+        s.wifi_calling_slots = wifi_calling_slots;
         Ok(())
     }
 }
