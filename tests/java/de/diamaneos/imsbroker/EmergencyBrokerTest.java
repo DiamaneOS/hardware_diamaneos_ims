@@ -409,6 +409,36 @@ public final class EmergencyBrokerTest {
         check(rig.cm.requests.isEmpty(), "nothing filed");
     }
 
+    /** Each undelivered failure for a distinct invalid request used to keep its own retry. */
+    static void undeliveredInvalidRequestFailuresAreNotKept() throws Exception {
+        Rig rig = new Rig();
+        int requests = 1000;
+        rig.daemon.failNext = requests;
+        for (int i = 0; i < requests; i++) {
+            rig.bringUp(3 + i, SOS, 1);
+        }
+        reports(rig.daemon);
+        rig.handler.runDelayed();
+        rig.handler.drain();
+        reports(rig.daemon);
+        check(rig.cm.requests.isEmpty(), "nothing filed");
+    }
+
+    /** An invalid type can share a valid request's key. Its failure must not cancel that one. */
+    static void invalidRequestDoesNotCancelAPendingFailure() throws Exception {
+        Rig rig = new Rig();
+        rig.bringUp(NO_SLOT, SOS, 1);
+        rig.daemon.failNext = 1;
+        rig.callback(0).onUnavailable();
+        rig.handler.drain();
+        reports(rig.daemon);
+        rig.bringUp(NO_SLOT, 0x100 | SOS, 2);
+        reports(rig.daemon, "failed type258-1#2 " + PdnFailure.INVALID_REQUEST);
+        rig.handler.runDelayed();
+        rig.handler.drain();
+        reports(rig.daemon, "failed sos-1#1 " + PdnFailure.UNAVAILABLE);
+    }
+
     static void untrustedCallersCannotFileOrRelease() throws Exception {
         Rig rig = new Rig();
         Binder.callingUid = 10123;
@@ -562,6 +592,8 @@ public final class EmergencyBrokerTest {
             EmergencyBrokerTest::unavailableEmergencyFailsAndCanBeRetried,
             EmergencyBrokerTest::refusedRequestFailsAtOnceAndCanBeRetried,
             EmergencyBrokerTest::invalidRequestsAreRefused,
+            EmergencyBrokerTest::undeliveredInvalidRequestFailuresAreNotKept,
+            EmergencyBrokerTest::invalidRequestDoesNotCancelAPendingFailure,
             EmergencyBrokerTest::untrustedCallersCannotFileOrRelease,
             EmergencyBrokerTest::daemonLossWithdrawsEveryRequestAndTheNextDaemonStartsClean,
             EmergencyBrokerTest::subscriptionChangeWithdrawsTheSimEmergencyButNotTheNoSimOne,

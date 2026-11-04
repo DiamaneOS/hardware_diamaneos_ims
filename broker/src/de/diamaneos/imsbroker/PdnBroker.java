@@ -142,7 +142,7 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
         }
         if (!isValid(request)) {
             Log.w(TAG, "invalid bring-up request");
-            reportFailed(request, PdnFailure.INVALID_REQUEST);
+            reportInvalid(request);
             return;
         }
         int key = key(request.slot, request.type);
@@ -370,6 +370,21 @@ final class PdnBroker implements PdnTracker.Listener, DcmConnection.Listener {
                 },
                 tracker,
                 REPORT_RETRY_MS);
+    }
+
+    /**
+     * Answers an invalid request once. It names no request the broker could hold, so it is not
+     * retried: a retry entry per invalid (slot, type) would grow without bound, and its key() could
+     * equal a held request's and cancel that request's pending failure report.
+     */
+    private void reportInvalid(PdnRequest request) {
+        try {
+            if (mDcm != null) {
+                mDcm.onPdnFailed(request, PdnFailure.INVALID_REQUEST);
+            }
+        } catch (RemoteException e) {
+            Log.w(TAG, "report not delivered");
+        }
     }
 
     private void reportFailed(PdnRequest request, int reason) {
