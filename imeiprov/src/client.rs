@@ -144,14 +144,14 @@ impl Client {
         let mut from_len = mem::size_of::<Address>() as libc::socklen_t;
         // SAFETY: recvfrom writes at most RECV_BUF bytes into the owned buffer
         // and the address into the sized struct. Lengths are checked after.
-        // MSG_TRUNC makes it return the datagram's real length, so a reply
-        // larger than the buffer is reported instead of silently cut.
+        // QRTR returns the copied length, so a longer reply arrives cut. The
+        // frame parser refuses it: RECV_BUF is above its largest frame.
         let n = unsafe {
             libc::recvfrom(
                 self.fd.as_raw_fd(),
                 bytes.as_mut_ptr().cast(),
                 bytes.len(),
-                libc::MSG_DONTWAIT | libc::MSG_TRUNC,
+                libc::MSG_DONTWAIT,
                 (&mut a as *mut Address).cast(),
                 &mut from_len,
             )
@@ -166,9 +166,6 @@ impl Client {
             } else {
                 Err(e)
             };
-        }
-        if n as usize > bytes.len() {
-            return Err(io::Error::other("QRTR datagram larger than the receive buffer"));
         }
         if from_len as usize != mem::size_of::<Address>() || a.family != AF_QIPCRTR as u16 {
             return Ok(None);
