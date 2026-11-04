@@ -184,8 +184,11 @@ public final class EmergencyBrokerTest {
             handler.drain();
             handler.runDelayed();
             handler.drain();
-            handler.awaitWork(5000);
-            handler.drain();
+            // The lookup thread can post its result while drain() still runs.
+            if (next.broker == null) {
+                handler.awaitWork(5000);
+                handler.drain();
+            }
             Daemon old = daemon;
             daemon = next;
             check(next.broker != null && next.broker != old.broker, "new broker binder");
