@@ -30,9 +30,7 @@ stack in a product.
    comparison tool. It never installs or overwrites inputs. Review duplicate
    precedence and mixed-use rows before adopting its output.
 
-The AML app and framework event patch in
-[platform_packages_apps_EmergencyLocation](https://github.com/DiamaneOS/platform_packages_apps_EmergencyLocation)
-are not part of DiamaneOS and not IMS prerequisites. Wi-Fi calling uses the
+AML is not part of DiamaneOS and not an IMS prerequisite. Wi-Fi calling uses the
 separate [IWLAN integration](wifi-calling.md).
 
 ## Tests

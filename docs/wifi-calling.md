@@ -19,15 +19,14 @@ PDN address.
 - The source observer and reporter give DSD acknowledged Wi-Fi state, current
   link addresses and bounded same-link DNS metadata. They negotiate no IKE and
   change no routing.
+- `wlantunneld` in `hardware/diamaneos/datad` carries the tunnel the modem
+  negotiates. The daemon here still negotiates no carrier tunnels.
 
 ## Alternative: AOSP path
 
-The [DiamaneOS IWLAN fork](https://github.com/DiamaneOS/platform_packages_services_Iwlan)
-at `packages/services/Iwlan`, with AOSP `QualifiedNetworksService` and the
-platform IKE/IPsec modules. Its `diamaneos/product.mk` and `diamaneos/board.mk`
-opt in the source package, framework binding and domain selection. The app has
-its own UID and keeps platform signing for the declared IPsec permission. The
-FP6 does not select it, and it is not qualified for the FP6 modem data path.
+The AOSP IWLAN service, with `QualifiedNetworksService` and the platform
+IKE/IPsec modules. The FP6 does not select it, and it is not qualified for the
+FP6 modem data path.
 
 ## Per-product checks and rules
 

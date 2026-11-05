@@ -61,9 +61,7 @@ authority.
 - The Android IMS service, modem firmware and carrier stack keep call routing,
   voice/SMS and carrier emergency location. This component supplies normal and
   emergency data connections, not AML delivery.
-- AML is not part of DiamaneOS. Its app and framework event patch
-  ([platform_packages_apps_EmergencyLocation](https://github.com/DiamaneOS/platform_packages_apps_EmergencyLocation))
-  are outside the build. Neither the daemon nor the broker needs them.
+- AML is not part of DiamaneOS. Neither the daemon nor the broker needs it.
 - Host tests do not cover the full Soong build and linking, enforcing policy,
   native syscall-filter execution or modem and carrier behavior.
 - Simulated emergency scenarios verify only the implemented state/protocol
